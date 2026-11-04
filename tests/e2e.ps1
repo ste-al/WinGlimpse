@@ -45,7 +45,9 @@ public static class E2E
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
+    // by title only; PowerShell would pass $null for a string parameter as "", which matches no class
+    public static IntPtr FindTitle(string title) { return FindWindow(null, title); }
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     public static RECT Frame(IntPtr h)
@@ -100,11 +102,12 @@ function Start-TestWindow([string]$title, [int]$x, [int]$y, [int]$w, [int]$h) {
         "`$f = New-Object System.Windows.Forms.Form; `$f.Text = '$title'; `$f.StartPosition = 'Manual'; " +
         "`$f.Location = New-Object System.Drawing.Point($x, $y); `$f.Size = New-Object System.Drawing.Size($w, $h); " +
         "[System.Windows.Forms.Application]::Run(`$f)"
-    $p = Start-Process powershell.exe -ArgumentList '-NoProfile', '-Command', $code -PassThru
+    # the console of the helper process hides itself, so only the test form counts as a window
+    $p = Start-Process powershell.exe -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', $code -PassThru
     $script:testProcesses += $p
     for ($i = 0; $i -lt 150; $i++) {
         Start-Sleep -Milliseconds 100
-        $h = [E2E]::FindWindow($null, $title)
+        $h = [E2E]::FindTitle($title)
         if ($h -ne [IntPtr]::Zero -and [E2E]::IsWindowVisible($h)) { return $h }
     }
     throw "test window '$title' did not appear"
@@ -176,7 +179,7 @@ try {
     Check (HasGlimpse $rc2 @($rb2, (Rect $a))) 'the nudged window has a glimpse' "C $(Fmt $rc2) B $(Fmt $rb2)"
 
     # ---- 3. the toast's Undo restores the exact previous rectangle
-    $toast = [E2E]::FindWindow($null, 'Glimpse toast')
+    $toast = [E2E]::FindTitle('Glimpse toast')
     Check ($toast -ne [IntPtr]::Zero) 'a toast offers Undo after the fix' ''
     if ($toast -ne [IntPtr]::Zero) {
         $rt = [E2E]::Frame($toast)
@@ -195,17 +198,17 @@ try {
     Keys @(0x11, 0x12, 0x20)
     Start-Sleep -Seconds 2
     Shot '4-xray'
-    $xray = [E2E]::FindWindow($null, 'Glimpse X-ray')
+    $xray = [E2E]::FindTitle('Glimpse X-ray')
     Check ($xray -ne [IntPtr]::Zero) 'Ctrl+Alt+Space opens X-ray' ''
     Keys @(0x1B)
     Start-Sleep -Seconds 1
-    $xray = [E2E]::FindWindow($null, 'Glimpse X-ray')
+    $xray = [E2E]::FindTitle('Glimpse X-ray')
     Check ($xray -eq [IntPtr]::Zero) 'Esc closes X-ray' ''
 
     # ---- 5. a second start with /settings opens the settings window
     Start-Process -FilePath $Exe -ArgumentList '/settings' | Out-Null
     $settings = [IntPtr]::Zero
-    for ($i = 0; $i -lt 50 -and $settings -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 200; $settings = [E2E]::FindWindow($null, 'Glimpse settings') }
+    for ($i = 0; $i -lt 50 -and $settings -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 200; $settings = [E2E]::FindTitle('Glimpse settings') }
     Start-Sleep -Seconds 1
     Shot '5-settings'
     Check ($settings -ne [IntPtr]::Zero) 'a second start with /settings opens Settings' ''

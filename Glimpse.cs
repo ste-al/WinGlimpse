@@ -7065,7 +7065,8 @@ settings.done = Done
             header.Invalidate();
             bool warn = app.Suspended || app.Store.UsingDefaults || app.S.Problems.Count > 0 || (app.Hotkeys != null && app.Hotkeys.Problem != null);
             string tip = "Glimpse \u00b7 " + status;
-            icon.Text = tip.Length > 127 ? tip.Substring(0, 126) + "\u2026" : tip;
+            // .NET Framework's NotifyIcon.Text throws above 63 characters
+            icon.Text = tip.Length > 63 ? tip.Substring(0, 62) + "\u2026" : tip;
             miXRay.ShortcutKeyDisplayString = app.Hotkeys != null && app.Hotkeys.Registered ? app.Hotkeys.Current.DisplayText() : "";
             var last = app.Undo.Last;
             miUndo.Enabled = last != null;
