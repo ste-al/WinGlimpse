@@ -129,7 +129,8 @@ positions per display setup for the session; when a known setup returns, a toast
 
 The settings window writes to `Glimpse.ini`; Glimpse also reloads the file when you edit it. It
 works from the keyboard (Tab, arrow keys, Space; Space cycles the hot corner, Delete removes an
-excluded app), and its controls tell screen readers their name, role and state. All options:
+excluded app), and its controls tell screen readers that use MSAA (NVDA, JAWS) their name, role and
+state. All options:
 
 | Section, key | Values | Default |
 |---|---|---|
@@ -269,7 +270,7 @@ and both builds must pass the same [geometry cases](tests/geometry-cases.txt).
   monitors and a laptop; scaling 100% → 150% → 125%; outline dragging in RDP; AltGr typing with German,
   Czech and Slovak layouts while Glimpse runs; Ctrl+Alt+Space through Remote Desktop Connection
   (windowed and full screen) and Citrix Workspace app on Server 2019, 2022 and 2025; memory of 50
-  sessions on one host.
+  sessions on one host; a pass over Settings with Narrator (UI Automation).
 
 ## License
 

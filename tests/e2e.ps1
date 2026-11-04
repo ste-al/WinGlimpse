@@ -8,7 +8,8 @@
       2. a window dropped so it covers all of another one but a 30 px strip nudges the covered
          window by the smallest move that gives it back a glimpse;
       3. the toast's Undo restores the nudged window's exact rectangle;
-      4. Ctrl+Alt+Space opens X-ray with the keyboard focus, Esc closes it;
+      4. Ctrl+Alt+Space opens X-ray with the keyboard focus, Esc closes it, and typing part of a
+         title then Enter brings that window forward;
       5. a second start with /settings opens the settings window, and its controls have names,
          roles and states for screen readers (MSAA);
       6. Glimpse keeps running through all of it, /exit closes it, and the log has no errors.
@@ -209,10 +210,19 @@ function Drag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
     [E2E]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)   # left up
 }
 
+# a chord: all keys down, then up in reverse order
 function Keys([byte[]]$down) {
     foreach ($k in $down) { [E2E]::keybd_event($k, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 30 }
     [array]::Reverse($down)
     foreach ($k in $down) { [E2E]::keybd_event($k, 0, 2, [IntPtr]::Zero); Start-Sleep -Milliseconds 30 }
+}
+
+# typing: one key after the other
+function Press([byte[]]$keys) {
+    foreach ($k in $keys) {
+        [E2E]::keybd_event($k, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 30
+        [E2E]::keybd_event($k, 0, 2, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
+    }
 }
 
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen
@@ -309,6 +319,19 @@ try {
     $xray = [E2E]::FindTitle('Glimpse X-ray')
     Check ($xray -eq [IntPtr]::Zero -or -not [E2E]::IsWindowVisible($xray)) 'Esc closes X-ray' ''
     Check (-not $glimpse.HasExited) 'Glimpse is still running after X-ray' (CrashDetail)
+
+    # ---- 4b. type to find: "e2e c" matches only Glimpse E2E C, Enter brings it forward and closes X-ray
+    Keys @(0x11, 0x12, 0x20)
+    Start-Sleep -Seconds 2
+    Press @(0x45, 0x32, 0x45, 0x20, 0x43)
+    Start-Sleep -Milliseconds 500
+    Shot '4b-xray-typed'
+    Press @(0x0D)
+    Start-Sleep -Milliseconds 1500
+    $xray = [E2E]::FindTitle('Glimpse X-ray')
+    $fgw = [E2E]::GetForegroundWindow()
+    $closed = $xray -eq [IntPtr]::Zero -or -not [E2E]::IsWindowVisible($xray)
+    Check ($closed -and ([E2E]::Describe($fgw)).EndsWith('"Glimpse E2E C"')) 'typing in X-ray finds a window and Enter brings it forward' ("X-ray closed: $closed; foreground: " + [E2E]::Describe($fgw))
 
     # ---- 5. a second start with /settings opens the settings window
     Start-Process -FilePath $Exe -ArgumentList '/settings' | Out-Null

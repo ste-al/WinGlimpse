@@ -284,8 +284,9 @@ namespace Glimpse
             WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105, WM_SYSCHAR = 0x0106, WM_TIMER = 0x0113, WM_MOUSEMOVE = 0x0200,
             WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202, WM_LBUTTONDBLCLK = 0x0203, WM_RBUTTONDOWN = 0x0204,
             WM_RBUTTONUP = 0x0205, WM_MOUSEWHEEL = 0x020A, WM_WTSSESSION_CHANGE = 0x02B1, WM_DPICHANGED = 0x02E0,
-            WM_HOTKEY = 0x0312, WM_NCLBUTTONDOWN = 0x00A1;
+            WM_HOTKEY = 0x0312, WM_NCLBUTTONDOWN = 0x00A1, WM_GETDLGCODE = 0x0087;
         public const int WA_INACTIVE = 0, MA_NOACTIVATE = 3;
+        public const int DLGC_WANTARROWS = 0x0001, DLGC_WANTTAB = 0x0002, DLGC_WANTALLKEYS = 0x0004, DLGC_WANTCHARS = 0x0080;
 
         // ---- hit-test results
         public const int HTERROR = -2, HTTRANSPARENT = -1, HTNOWHERE = 0, HTCLIENT = 1, HTCAPTION = 2, HTSYSMENU = 3,
@@ -6939,6 +6940,11 @@ settings.done = Done
                         break;
                     case Native.WM_DPICHANGED:
                         m.Result = IntPtr.Zero;
+                        return;
+                    case Native.WM_GETDLGCODE:
+                        // the WinForms message loop runs IsDialogMessage for windows that are not Controls, and that
+                        // would turn Esc and Enter into commands and eat arrows, Tab and typing: X-ray wants every key
+                        m.Result = (IntPtr)(Native.DLGC_WANTALLKEYS | Native.DLGC_WANTARROWS | Native.DLGC_WANTTAB | Native.DLGC_WANTCHARS);
                         return;
                 }
             }
