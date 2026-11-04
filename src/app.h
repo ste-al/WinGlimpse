@@ -24,7 +24,7 @@ bool DragFullWindows();
 bool TryFrame(HWND hwnd, Rc& r);
 bool IsCloaked(HWND hwnd);
 void SetDarkTitleBar(HWND hwnd, bool dark);
-void SetRoundCorners(HWND hwnd, bool small);
+void SetRoundCorners(HWND hwnd, bool smallRadius);
 int IntegrityLevel(DWORD pid);   // 0: this process; -1 when it cannot be read
 wstr ProcessFileName(DWORD pid);
 bool KeyDown(int vk);

@@ -1,7 +1,7 @@
 // Glimpse native build: icon, manifest, built-in English texts and default settings.
 // Compile from the repository root: rc /I src /fo Glimpse.res src\Glimpse.rc  (or llvm-rc / windres)
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include <winres.h>
+#include <winresrc.h>
 #include "resource.h"
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL

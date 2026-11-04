@@ -7,7 +7,8 @@ Alt+Tab often reaches the local PC instead of the session.
 
 Start
 -----
-  Glimpse.exe                        EXE build (win-x64 or win-arm64 package)
+  Glimpse.exe                        EXE build (win-x64, win-arm64, native-win-x64 or
+                                     native-win-arm64 package)
   powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File Glimpse.ps1
                                      PowerShell build (Glimpse.cs must sit next to it)
 
@@ -46,6 +47,8 @@ Requirements
 ------------
   Windows 10 or 11, or Windows Server 2019 to 2025, with the .NET Framework 4.7.2 or later
   (built in). The ARM64 EXE needs .NET Framework 4.8.1 (Windows 11 22H2 or later).
+  The native packages (C++) need no .NET: Windows 10 or 11, or Windows Server 2019 to 2025.
+  Both builds behave the same and share Glimpse.ini, lang\, the log and the size memory.
   No admin rights, service, driver, DLL injection or keyboard hook. Log and size memory:
   %LOCALAPPDATA%\Glimpse
 

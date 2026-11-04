@@ -1578,9 +1578,9 @@ SettingsWindow::SettingsWindow(GlimpseApp* app, const Settings& s, int dpi) : im
     p.hwnd = hwnd;
     if (!hwnd) throw std::runtime_error("cannot create the settings window (error " + std::to_string(GetLastError()) + ")");
     HICON big = (HICON)LoadImageW(Ui::Instance(), MAKEINTRESOURCEW(IDI_GLIMPSE), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
-    HICON small = (HICON)LoadImageW(Ui::Instance(), MAKEINTRESOURCEW(IDI_GLIMPSE), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
+    HICON smallIcon = (HICON)LoadImageW(Ui::Instance(), MAKEINTRESOURCEW(IDI_GLIMPSE), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
     if (big) SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)big);
-    if (small) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)small);
+    if (smallIcon) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)smallIcon);
     p.Build();
     if (mon) {
         RECT wr;

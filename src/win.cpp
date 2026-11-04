@@ -57,8 +57,8 @@ void SetDarkTitleBar(HWND hwnd, bool dark) {
     if (DwmSetWindowAttribute(hwnd, 20, &v, sizeof v) != S_OK) DwmSetWindowAttribute(hwnd, 19, &v, sizeof v);
 }
 
-void SetRoundCorners(HWND hwnd, bool small) {
-    int v = small ? 3 : 2;
+void SetRoundCorners(HWND hwnd, bool smallRadius) {
+    int v = smallRadius ? 3 : 2;
     DwmSetWindowAttribute(hwnd, 33, &v, sizeof v);
 }
 

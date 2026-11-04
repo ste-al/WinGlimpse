@@ -1,6 +1,7 @@
 // Glimpse native build: X-ray, every window's outline and name, through whatever covers it.
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app.h"
+#include <climits>
 
 namespace glimpse {
 

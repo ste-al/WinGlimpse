@@ -25,8 +25,9 @@ inside RDP and Citrix sessions, where Alt+Tab usually reaches the local PC inste
   off-screen windows are rescued, glimpses are rescaled and both rules are checked again. A display
   setup that returns can get its window positions back.
 - **Nothing to install.** One C# file (`Glimpse.cs`, C# 5) runs as `Glimpse.exe` on the .NET
-  Framework that ships with Windows, or as `Glimpse.ps1` through `Add-Type`. Settings live in
-  `Glimpse.ini` next to the program. No admin rights, service, driver, DLL injection or keyboard hook.
+  Framework that ships with Windows, or as `Glimpse.ps1` through `Add-Type`. An optional native
+  build (C++, [`src/`](src)) does the same without .NET. Settings live in `Glimpse.ini` next to the
+  program. No admin rights, service, driver, DLL injection or keyboard hook.
 
 ## Download
 
@@ -37,6 +38,12 @@ Ready-made packages are in [`dist/`](dist):
 | [`Glimpse-1.0.0-win-x64.zip`](dist/Glimpse-1.0.0-win-x64.zip) | `Glimpse.exe` (x64), `Glimpse.ini`, `lang\`, logon script | Windows 10/11 and Server 2019–2025 on x64 (.NET Framework 4.7.2 or later) |
 | [`Glimpse-1.0.0-win-arm64.zip`](dist/Glimpse-1.0.0-win-arm64.zip) | `Glimpse.exe` (ARM64) and the same files | Windows 11 22H2+ / Server 2025 on ARM64 (.NET Framework 4.8.1) |
 | [`Glimpse-1.0.0-ps1.zip`](dist/Glimpse-1.0.0-ps1.zip) | `Glimpse.ps1` + `Glimpse.cs`, `Glimpse.ini`, `lang\`, logon script, and `build.cmd` with the manifest and icon to compile `Glimpse.exe` on the server | any architecture, Windows PowerShell 5.1 in Full Language mode |
+| [`Glimpse-1.0.0-native-win-x64.zip`](dist/Glimpse-1.0.0-native-win-x64.zip) | native `Glimpse.exe` (C++, x64) and the same files as the x64 package | Windows 10/11 and Server 2019–2025 on x64, no .NET needed |
+| [`Glimpse-1.0.0-native-win-arm64.zip`](dist/Glimpse-1.0.0-native-win-arm64.zip) | native `Glimpse.exe` (C++, ARM64) and the same files | Windows 11 and Server 2025 on ARM64, no .NET needed |
+
+The C# and native builds behave the same and share `Glimpse.ini`, `lang\`, the log and the
+size memory, so either can replace the other. The native build loads no .NET runtime: it starts
+faster and needs less memory per session, which adds up on a server with many sessions.
 
 [`dist/SHA256SUMS.txt`](dist/SHA256SUMS.txt) lists the hashes of the zips and the EXEs, for
 AppLocker or WDAC hash rules. The EXEs are not signed yet; a copy downloaded from the web carries
@@ -212,7 +219,9 @@ Windows, so a German user sees Strg+Alt+Leertaste.
 ## Building
 
 The program is one file, [`Glimpse.cs`](Glimpse.cs), kept at C# 5 and pure ASCII so the C#
-compiler that ships with Windows can build it.
+compiler that ships with Windows can build it. The native build in [`src/`](src) is the same
+design in C++17 with Win32, GDI+ and DWM; its geometry engine and resolver are a line-by-line port,
+and both builds must pass the same [geometry cases](tests/geometry-cases.txt).
 
 - **On a Windows server, no SDK:** `build.cmd` runs
   `%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /optimize+ /win32manifest:Glimpse.manifest /win32icon:Glimpse.ico /out:Glimpse.exe Glimpse.cs`
@@ -222,18 +231,31 @@ compiler that ships with Windows can build it.
   and ARM64 (4.8.1) EXEs from [`build/Glimpse.csproj`](build/Glimpse.csproj) with the language level
   pinned to C# 5, runs the self-test and language check with Mono, renders preview images under Xvfb,
   and writes the packages, `SHA256SUMS.txt` and `BUILDINFO.txt` to `dist/`.
+- **Native, with Visual Studio:** `build-native.cmd` (x64, or ARM64 on an ARM64 PC) or
+  `build-native.cmd arm64` runs
+  `cl /O2 /MT /EHsc /std:c++17 /DUNICODE /D_UNICODE src\*.cpp` with the resources from
+  [`src/Glimpse.rc`](src/Glimpse.rc) and writes `out\native-<arch>\Glimpse.exe`, statically linked
+  (`/MT`, no runtime DLLs). `build-native.cmd x64 test` also runs the self-test.
+- **Native, on Linux:** [`tools/build-mingw-toolchain.sh`](tools/build-mingw-toolchain.sh) builds a
+  clang/mingw-w64 cross toolchain for x64 and ARM64 from the Ubuntu sources (LLVM 18, mingw-w64 12,
+  libc++ linked statically), then `./build-native.sh --test` builds both EXEs and runs the self-test
+  under Wine. The build is reproducible: the same sources give byte-identical EXEs. `./build.sh` runs
+  it too and adds the native packages to `dist/`.
 - **CI** ([`.github/workflows/build.yml`](.github/workflows/build.yml)) checks that `dist/` matches
   the sources, builds on Linux, then on Windows Server 2022, Windows Server 2025 and Windows 11 ARM64:
   builds with the in-box `csc.exe`, runs the self-test of the in-box EXE, the x64/ARM64 EXE and the
   PowerShell build, renders previews and runs an end-to-end test with real windows
-  ([`tests/e2e.ps1`](tests/e2e.ps1)).
+  ([`tests/e2e.ps1`](tests/e2e.ps1)). The same runners build the native EXE with MSVC and run its
+  self-test, previews and end-to-end test, and run the self-test of the native EXEs in `dist/`
+  (so the ARM64 binary built on Linux is tested on a real ARM64 machine).
 
 ### Tests
 
 - [`tests/geometry-cases.txt`](tests/geometry-cases.txt): the shared geometry cases (zones, caption
   buttons, multi-monitor and DPI, drop nudges and their limits, new-window placement, Strict
   shrinking, admin/stubborn/topmost/maximized windows, minimum sizes, rescue, snap guides). Every build
-  must pass the same file; [`docs/algorithm.md`](docs/algorithm.md) describes the decisions it pins down.
+  (C#, PowerShell, native) must pass the same file; [`docs/algorithm.md`](docs/algorithm.md) describes
+  the decisions it pins down.
 - `Glimpse.exe /selftest` also runs unit tests of the INI reader and writer, settings round trips,
   regular-expression rules, hotkey parsing, plural rules and placeholders.
 - Manual checks for a pilot (need real sessions): 30 windows on 4 monitors; reconnect from 1, 4

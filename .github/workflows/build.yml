@@ -26,7 +26,7 @@ jobs:
         run: ./build.sh --check-dist
 
       - name: Build x64 and ARM64 (C# 5), self-test, language check, previews
-        run: ./build.sh --no-dist
+        run: ./build.sh --no-dist --no-native
 
       - uses: actions/upload-artifact@v4
         with:
@@ -105,13 +105,52 @@ jobs:
         shell: powershell
         run: .\tests\e2e.ps1 -Exe out\${{ matrix.exe }}\Glimpse.exe -Out e2e
 
+      - name: Build the native C++ EXE with Visual Studio (MSVC, /MT)
+        shell: cmd
+        run: build-native.cmd ${{ matrix.exe }}
+
+      - name: Self-test, native MSVC build
+        shell: powershell
+        run: |
+          $p = Start-Process out\native-${{ matrix.exe }}\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-native-msvc.txt
+          Get-Content selftest-native-msvc.txt
+          exit $p.ExitCode
+
+      - name: Self-test, native EXE from dist/ (clang, cross-compiled on Linux)
+        shell: powershell
+        run: |
+          $zip = Get-ChildItem dist\Glimpse-*-native-win-${{ matrix.exe }}.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath dist-native -Force
+          $p = Start-Process dist-native\Glimpse\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-native-dist.txt
+          Get-Content selftest-native-dist.txt
+          $q = Start-Process dist-native\Glimpse\Glimpse.exe -ArgumentList '/checklang' -Wait -PassThru -NoNewWindow -RedirectStandardOutput checklang-native.txt
+          Get-Content checklang-native.txt
+          exit ($p.ExitCode + $q.ExitCode)
+
+      - name: Preview images, native build
+        shell: powershell
+        run: |
+          foreach ($lang in 'en', 'de', 'qps') {
+            $p = Start-Process out\native-${{ matrix.exe }}\Glimpse.exe -ArgumentList "/render:previews-native\$lang", "/renderlang:$lang" -Wait -PassThru -NoNewWindow -RedirectStandardOutput "render-native-$lang.txt"
+            Get-Content "render-native-$lang.txt"
+            if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+          }
+
+      - name: End-to-end smoke test, native build
+        continue-on-error: true
+        shell: powershell
+        run: .\tests\e2e.ps1 -Exe out\native-${{ matrix.exe }}\Glimpse.exe -Out e2e-native
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: windows-${{ matrix.os }}
           path: |
             selftest-*.txt
-            checklang.txt
+            checklang*.txt
             previews
+            previews-native
             e2e
+            e2e-native
             Glimpse.exe
+            out/native-${{ matrix.exe }}/Glimpse.exe

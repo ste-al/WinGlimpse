@@ -5,19 +5,22 @@
 #   * Glimpse.exe for x64 (.NET Framework 4.7.2) and ARM64 (.NET Framework 4.8.1), C# 5 enforced
 #   * self-test with Mono (geometry cases and unit tests), language-file check
 #   * preview images with /render (Mono + Xvfb), when available
+#   * the native C++ Glimpse.exe for x64 and ARM64 (build-native.sh), when the clang/mingw-w64
+#     toolchain from tools/build-mingw-toolchain.sh is installed (required for dist/)
 #   * dist/: one zip per build, SHA256SUMS.txt, BUILDINFO.txt
 #
-# Usage: ./build.sh [--no-dist] [--no-previews] [--check-dist]
+# Usage: ./build.sh [--no-dist] [--no-previews] [--no-native] [--check-dist]
 #   --check-dist   only verify that dist/ was built from the current sources
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cd "$here"
 
-want_dist=1; want_previews=1; check_only=0
+want_dist=1; want_previews=1; want_native=1; check_only=0
 for a in "$@"; do
   case "$a" in
     --no-dist) want_dist=0 ;;
     --no-previews) want_previews=0 ;;
+    --no-native) want_native=0 ;;
     --check-dist) check_only=1 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
   esac
@@ -27,8 +30,9 @@ version=$(sed -n 's/^ *public const string Version = "\([0-9.]*\)";.*/\1/p' Glim
 [ -n "$version" ] || { echo "cannot read the version from Glimpse.cs" >&2; exit 1; }
 
 # Files every package is built from; their hashes go into dist/BUILDINFO.txt.
-sources=(Glimpse.cs Glimpse.ps1 Glimpse.manifest Glimpse.ico Glimpse.ini build.cmd build/Glimpse.csproj LICENSE docs/README-dist.txt)
-while IFS= read -r f; do sources+=("$f"); done < <(ls lang/*.txt deploy/*.cmd 2>/dev/null | sort)
+sources=(Glimpse.cs Glimpse.ps1 Glimpse.manifest Glimpse.ico Glimpse.ini build.cmd build/Glimpse.csproj LICENSE docs/README-dist.txt
+         build-native.sh build-native.cmd tools/build-mingw-toolchain.sh)
+while IFS= read -r f; do sources+=("$f"); done < <(ls lang/*.txt deploy/*.cmd src/* 2>/dev/null | LC_ALL=C sort)
 
 buildinfo() {
   echo "Glimpse $version"
@@ -89,7 +93,22 @@ else
   echo "warning: mono not found, self-test skipped" >&2
 fi
 
+# the native C++ build needs the cross toolchain; dist/ always contains it
+native=0
+if [ "$want_native" = 1 ]; then
+  if [ -x "${GLIMPSE_MINGW:-/opt/glimpse-mingw}/bin/x86_64-w64-mingw32-clang++" ]; then
+    ./build-native.sh --test
+    native=1
+  elif [ "$want_dist" = 1 ]; then
+    echo "the native build needs the clang/mingw-w64 toolchain: run tools/build-mingw-toolchain.sh (or ./build.sh --no-dist)" >&2
+    exit 1
+  else
+    echo "note: clang/mingw-w64 toolchain not found, native build skipped (CI builds it with MSVC on Windows)" >&2
+  fi
+fi
+
 [ "$want_dist" = 1 ] || exit 0
+[ "$native" = 1 ] || { echo "dist/ needs the native build (drop --no-native)" >&2; exit 1; }
 
 echo "== dist"
 rm -rf dist
@@ -114,6 +133,8 @@ common = [('Glimpse.ini', 'Glimpse.ini'), ('LICENSE', 'LICENSE.txt'), ('docs/REA
 packages = {
     'Glimpse-%s-win-x64.zip' % version: [(out + '/x64/Glimpse.exe', 'Glimpse.exe'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
     'Glimpse-%s-win-arm64.zip' % version: [(out + '/arm64/Glimpse.exe', 'Glimpse.exe'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
+    'Glimpse-%s-native-win-x64.zip' % version: [(out + '/native-x64/Glimpse.exe', 'Glimpse.exe'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
+    'Glimpse-%s-native-win-arm64.zip' % version: [(out + '/native-arm64/Glimpse.exe', 'Glimpse.exe'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
     'Glimpse-%s-ps1.zip' % version: [('Glimpse.ps1', 'Glimpse.ps1'), ('Glimpse.cs', 'Glimpse.cs'),
                                     ('build.cmd', 'build.cmd'), ('Glimpse.manifest', 'Glimpse.manifest'), ('Glimpse.ico', 'Glimpse.ico'),
                                     ('deploy/Start-Glimpse-ps1.cmd', 'deploy/Start-Glimpse-ps1.cmd'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
@@ -128,7 +149,8 @@ for name, files in packages.items():
             else:
                 print('warning: missing ' + src, file=sys.stderr)
     sums.append((name, path))
-for label, path in [('win-x64/Glimpse.exe', out + '/x64/Glimpse.exe'), ('win-arm64/Glimpse.exe', out + '/arm64/Glimpse.exe')]:
+for label, path in [('win-x64/Glimpse.exe', out + '/x64/Glimpse.exe'), ('win-arm64/Glimpse.exe', out + '/arm64/Glimpse.exe'),
+                    ('native-win-x64/Glimpse.exe', out + '/native-x64/Glimpse.exe'), ('native-win-arm64/Glimpse.exe', out + '/native-arm64/Glimpse.exe')]:
     sums.append((label, path))
 with open('dist/SHA256SUMS.txt', 'w', newline='\n') as f:
     for label, path in sorted(sums):
