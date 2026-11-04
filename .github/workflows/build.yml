@@ -123,8 +123,9 @@ jobs:
             Get-Content "render-$lang.txt"
           }
 
+      # required on x64; the ARM64 runner has no taskbar and does not move windows on a synthetic drag
       - name: End-to-end smoke test (real windows, drag and drop, X-ray, settings)
-        continue-on-error: true
+        continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
         shell: powershell
         run: .\tests\e2e.ps1 -Exe out\${{ matrix.exe }}\Glimpse.exe -Out e2e
 
@@ -160,7 +161,7 @@ jobs:
           }
 
       - name: End-to-end smoke test, native build
-        continue-on-error: true
+        continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
         shell: powershell
         run: .\tests\e2e.ps1 -Exe out\native-${{ matrix.exe }}\Glimpse.exe -Out e2e-native
 

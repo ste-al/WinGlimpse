@@ -255,7 +255,9 @@ and both builds must pass the same [geometry cases](tests/geometry-cases.txt).
   PowerShell build, renders previews and runs an end-to-end test with real windows
   ([`tests/e2e.ps1`](tests/e2e.ps1)). The same runners build the native EXE with MSVC and run its
   self-test, previews and end-to-end test, and run the self-test of the native EXEs in `dist/`
-  (so the ARM64 binary built on Linux is tested on a real ARM64 machine).
+  (so the ARM64 binary built on Linux is tested on a real ARM64 machine). The end-to-end test must
+  pass on the x64 runners; on the ARM64 runner, which has no taskbar and does not move windows on a
+  synthetic drag, its result is for information.
 
 ### Tests
 
