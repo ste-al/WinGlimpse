@@ -42,7 +42,11 @@ XRayView::XRayView(GlimpseApp* a) : app(a), digitTimer(700) {
 
 XRayView::~XRayView() {
     digitTimer.Stop();
-    surfaces.clear();
+    // detach first, as in Close: a surface that is destroyed may send WM_ACTIVATE back to the view
+    std::vector<std::unique_ptr<XRaySurface>> closing;
+    closing.swap(surfaces);
+    main = nullptr;
+    closing.clear();
 }
 
 std::vector<XRayEntry> XRayView::Collect(const WindowRegistry& reg, bool showMinimized) {
@@ -98,18 +102,21 @@ void XRayView::Show(bool fromKeyboard) {
 
 void XRayView::Close() {
     digitTimer.Stop();
+    // detach the surfaces first: hiding the active one sends WM_ACTIVATE (and more) into the view right away,
+    // and the view must already be closed then
+    std::vector<std::unique_ptr<XRaySurface>> closing;
+    closing.swap(surfaces);
+    main = nullptr;
     // the windows may be closing from inside their own message: hide now, destroy a moment later
-    for (auto& s : surfaces) {
+    for (auto& s : closing) {
         XRaySurface* raw = s.release();
         ShowWindow(raw->hwnd, SW_HIDE);
         Ui::Post([raw]() { delete raw; });
     }
-    surfaces.clear();
-    main = nullptr;
 }
 
 bool XRayView::Owns(HWND h) const {
-    for (const auto& s : surfaces) if (s->hwnd == h) return true;
+    for (const auto& s : surfaces) if (s && s->hwnd == h) return true;
     return false;
 }
 

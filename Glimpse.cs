@@ -6559,9 +6559,12 @@ settings.done = Done
         public void Close()
         {
             digitTimer.Stop();
-            foreach (var s in surfaces) s.Dispose();
+            // detach the surfaces first: destroying the active one sends WM_ACTIVATE into the view right away,
+            // and X-ray must already be closed then
+            var closing = surfaces.ToArray();
             surfaces.Clear();
             main = null;
+            foreach (var s in closing) s.Dispose();
         }
 
         public bool Owns(IntPtr h)

@@ -1,6 +1,6 @@
 Glimpse 1.0.0
 Built by build.sh from these sources (sha256):
-673a34d53eabf12a8df403b4d64c220529a22eb8246fdace6355817048f3a6a3  Glimpse.cs
+b90dd60fd50dd364a9dd9a9c2db7e59504029e78ef01d569108c89b88cce4c06  Glimpse.cs
 22cdce4b6fafb3808245e32dedbfde00be087d83d58295d0cc2a7b7ab260dac6  Glimpse.ps1
 e71f97978360f8492e502f6c9a1727f6ab3ee5234347f47ea96846f957e9a46e  Glimpse.manifest
 12eaa4db88d576ccd8efdaebfdfd68f813458a93c15475ba3838360236cbb38f  Glimpse.ico
@@ -33,4 +33,4 @@ beeea83dc1f962e2b6d07d27a2266e324f8b1f557982dd483e5639312095aeef  src/previews.c
 2b6c6cccbc97a62c9bb08fb12a6b8080b27e8d8a24131a06815b9d4f65449bdc  src/settingsui.cpp
 b2394437738e79c516bb4ca2062c5739aade7d074e3a71e00fafbb7aa8fd3c61  src/tray.cpp
 ef369369f9607e90ff4a7791b3f3914c555140c9df88bd7e8ab7bbe2a223c4aa  src/win.cpp
-67306a2f0aa9deb871fc356ab5cd45afd9bfb6df9c9bf2e4a8776ee64d97681e  src/xray.cpp
+d5b29cefc6856e63f888e77869ce684e9c7fad4dc76f430827709f9310bf60f9  src/xray.cpp

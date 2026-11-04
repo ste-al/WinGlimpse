@@ -11,7 +11,7 @@
       4. Ctrl+Alt+Space opens X-ray, Esc closes it;
       5. a second start with /settings opens the settings window, and its controls have names and
          roles for screen readers (UI Automation);
-      6. /exit closes Glimpse, and the log has no errors.
+      6. Glimpse keeps running through all of it, /exit closes it, and the log has no errors.
     The test windows come from a small WinForms program compiled on the fly (no console windows), and
     every other window is minimized first, so only the test windows count.
     Screenshots and the log are written to -Out. The exit code is the number of failed checks.
@@ -181,6 +181,19 @@ $text = $text -replace 'StartWithWindows=1', 'StartWithWindows=0' -replace 'HotC
 $log = Join-Path $env:LOCALAPPDATA 'Glimpse\Glimpse.log'
 if (Test-Path $log) { Remove-Item -LiteralPath $log -Force }
 
+# when Glimpse is gone too early: its exit code and the crash report Windows logged, if any
+function CrashDetail {
+    if (-not $glimpse.HasExited) { return '' }
+    $d = 'exit code 0x{0:X8}' -f $glimpse.ExitCode
+    try {
+        $ev = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error'; StartTime = $started } -MaxEvents 10 -ErrorAction Stop |
+            Where-Object { $_.Message -match 'Glimpse' } | Select-Object -First 1
+        if ($ev) { $d += '; ' + (($ev.Message -split "`r?`n" | Where-Object { $_ -match 'Faulting|Exception code|Fault offset' }) -join '; ') }
+    } catch { }
+    return $d
+}
+
+$started = Get-Date
 $glimpse = Start-Process -FilePath $Exe -ArgumentList "/ini:$ini" -PassThru
 Start-Sleep -Seconds 4
 Check (-not $glimpse.HasExited) 'Glimpse starts and keeps running' ''
@@ -243,6 +256,7 @@ try {
     Start-Sleep -Seconds 1
     $xray = [E2E]::FindTitle('Glimpse X-ray')
     Check ($xray -eq [IntPtr]::Zero -or -not [E2E]::IsWindowVisible($xray)) 'Esc closes X-ray' ''
+    Check (-not $glimpse.HasExited) 'Glimpse is still running after X-ray' (CrashDetail)
 
     # ---- 5. a second start with /settings opens the settings window
     Start-Process -FilePath $Exe -ArgumentList '/settings' | Out-Null
@@ -276,10 +290,14 @@ catch {
     Check $false 'scenario' $_.Exception.Message
 }
 finally {
-    # ---- 6. /exit ends Glimpse
-    Start-Process -FilePath $Exe -ArgumentList '/exit' -Wait | Out-Null
-    $glimpse.WaitForExit(10000) | Out-Null
-    Check $glimpse.HasExited '/exit closes the running Glimpse' ''
+    # ---- 6. /exit ends Glimpse (a Glimpse that is already gone does not count as closed by /exit)
+    $alive = -not $glimpse.HasExited
+    Check $alive 'Glimpse kept running through the scenario' (CrashDetail)
+    if ($alive) {
+        Start-Process -FilePath $Exe -ArgumentList '/exit' -Wait | Out-Null
+        $glimpse.WaitForExit(10000) | Out-Null
+        Check $glimpse.HasExited '/exit closes the running Glimpse' ''
+    }
     if (-not $glimpse.HasExited) { $glimpse.Kill() }
     foreach ($p in $testProcesses) { if (-not $p.HasExited) { $p.Kill() } }
 }
