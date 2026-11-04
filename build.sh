@@ -92,6 +92,20 @@ if command -v mono >/dev/null 2>&1; then
   echo "== defaults"
   mono "$out/x64/Glimpse.exe" /dumpini:"$out/Glimpse.default.ini" >/dev/null
   cmp -s "$out/Glimpse.default.ini" Glimpse.ini || { echo "Glimpse.ini differs from the built-in defaults (Settings.DefaultIniText)" >&2; exit 1; }
+  if command -v mcs >/dev/null 2>&1; then
+    # crowded 1920x1080 desktops through the real resolver: the rules hold in every mode, and the outcomes
+    # become test cases the native build must reproduce (below, under Wine)
+    echo "== crowded desktops (tests/simulate.cs)"
+    mkdir -p "$out/sim"
+    mcs -nologo -langversion:5 -main:GlimpseSim.Program -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Core.dll \
+      -r:Accessibility.dll -out:"$out/sim/simulate.exe" Glimpse.cs tests/simulate.cs > "$out/sim/build.txt" 2>&1 \
+      || { grep -v ' warning ' "$out/sim/build.txt" >&2; echo "tests/simulate.cs does not compile" >&2; exit 1; }
+    mono "$out/sim/simulate.exe" "$out/sim" 150 1 12 > /dev/null \
+      || { grep '!!' "$out/sim/report.txt" | head -20 >&2; echo "crowded desktops: rules broken, see $out/sim/report.txt" >&2; exit 1; }
+    grep -E "Arrange now: windows|RULES" "$out/sim/report.txt"
+    mono "$out/x64/Glimpse.exe" /selftest:"$out/sim/sim-cases.txt" > "$out/sim/selftest.txt" || true
+    grep -q '^PASS' "$out/sim/selftest.txt" || { grep '^not ok' "$out/sim/selftest.txt" | head >&2; echo "simulated cases fail in the C# build" >&2; exit 1; }
+  fi
   if [ "$want_previews" = 1 ] && command -v xvfb-run >/dev/null 2>&1; then
     echo "== previews"
     for lang in en de qps; do
@@ -109,6 +123,13 @@ if [ "$want_native" = 1 ]; then
   if [ -x "${GLIMPSE_MINGW:-/opt/glimpse-mingw}/bin/x86_64-w64-mingw32-clang++" ]; then
     ./build-native.sh --test
     native=1
+    if [ -f "$out/sim/sim-cases.txt" ] && command -v wine >/dev/null 2>&1; then
+      echo "== crowded desktops, native build (Wine): the same decisions as the C# build"
+      WINEDEBUG=-all wine out/native-x64/Glimpse.exe /selftest:out\\sim\\sim-cases.txt | tr -d '\r' > "$out/sim/native-selftest.txt" || true
+      grep -q '^PASS' "$out/sim/native-selftest.txt" \
+        || { grep '^not ok' "$out/sim/native-selftest.txt" | head >&2; echo "the native build decides differently on simulated desktops" >&2; exit 1; }
+      grep '^PASS' "$out/sim/native-selftest.txt"
+    fi
   elif [ "$want_dist" = 1 ]; then
     echo "the native build needs the clang/mingw-w64 toolchain: run tools/build-mingw-toolchain.sh (or ./build.sh --no-dist)" >&2
     exit 1

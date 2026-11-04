@@ -236,6 +236,35 @@ expect moves 0
 expect hidden A
 end
 
+# V is covered on every edge and no nudge within its limit (100 px) frees it; pulling its bottom edge
+# up to D4 opens a free bottom strip between D3 and D4
+case strict: a covered window pulls one edge in when no nudge can free it
+mode strict
+window V 100 100 700 500
+window C 500 0 1100 800
+window D1 0 0 450 180
+window D2 0 150 450 700
+window D3 400 20 520 300 stubborn
+window D4 400 380 520 560 stubborn
+action arrange
+expect moves 1
+expect at V 100 100 700 380
+expect free V
+end
+
+case assist: the same window stays where it is, Assist never shrinks
+mode assist
+window V 100 100 700 500
+window C 500 0 1100 800
+window D1 0 0 450 180
+window D2 0 150 450 700
+window D3 400 20 520 300 stubborn
+window D4 400 380 520 560 stubborn
+action arrange
+expect moves 0
+expect hidden V noSpace
+end
+
 # ---------------------------------------------------------------- minimum size
 
 case minimum size: the dragged left edge moves back

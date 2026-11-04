@@ -268,6 +268,13 @@ and both builds must pass the same [geometry cases](tests/geometry-cases.txt).
   the decisions it pins down.
 - `Glimpse.exe /selftest` also runs unit tests of the INI reader and writer, settings round trips,
   regular-expression rules, hotkey parsing, plural rules and placeholders.
+- [`tests/simulate.cs`](tests/simulate.cs), run by `./build.sh`: crowded 1920×1080 desktops, 8 windows
+  of random size under 8 of 1600×800, through the real resolver. In Guide, Assist and Strict it runs
+  Arrange now, user and app moves and resizes and a new window, and checks every outcome: Guide moves
+  nothing, Assist leaves app moves alone, no window loses its glimpse (except through the documented
+  cascade, which must leave fewer windows without one), every window moves at most once and stays on
+  the work area, nudges keep their limit, and repeated Arrange now settles. The outcomes are exported
+  as test cases that the native build must reproduce exactly; a report and pictures go to `out/sim/`.
 - Manual checks for a pilot (need real sessions): 30 windows on 4 monitors; reconnect from 1, 4
   monitors and a laptop; scaling 100% → 150% → 125%; outline dragging in RDP; AltGr typing with German,
   Czech and Slovak layouts while Glimpse runs; Ctrl+Alt+Space through Remote Desktop Connection
