@@ -1,0 +1,147 @@
+# Glimpse texts: German (Deutsch), translated from lang/en.txt.
+# Format: key = text, UTF-8. Keep {placeholders} as they are. Plural keys: .one, .other
+_name = Deutsch
+
+# ---- general
+windows.one = {count} Fenster
+windows.other = {count} Fenster
+
+# ---- tray icon and menu
+status.guarding.one = Schützt {count} Fenster
+status.guarding.other = Schützt {count} Fenster
+status.allInReach = alle erreichbar
+status.hidden.one = {count} Fenster nur über X-Ray erreichbar
+status.hidden.other = {count} Fenster nur über X-Ray erreichbar
+status.paused = Pausiert bis {time}
+status.pausedTomorrow = Pausiert bis morgen
+status.guide = Modus Zeigen: nur Hinweise und X-Ray
+status.suspended = Automatische Korrekturen pausiert: zu viele Verschiebungen in kurzer Zeit
+status.overLimit = Automatische Korrekturen gelten für die {count} zuletzt benutzten Fenster
+status.invalidPattern = Ein Titelmuster in Glimpse.ini ist ungültig
+status.iniDefaults = Glimpse.ini kann nicht gelesen werden: Standardeinstellungen aktiv
+status.hotkeyTaken = Die X-Ray-Tastenkombination {hotkey} wird von einem anderen Programm verwendet
+status.idle = Ruht, solange die Sitzung gesperrt oder getrennt ist
+menu.xray = X-Ray: alle Fenster zeigen
+menu.arrange = Jetzt anordnen
+menu.undo = Letzte Korrektur rückgängig machen
+menu.pause = Pausieren
+menu.pauseHint = 15 Min. · 1 Std. · bis morgen
+menu.pause15 = 15 Minuten
+menu.pause60 = 1 Stunde
+menu.pauseTomorrow = Bis morgen
+menu.resume = Fortsetzen
+menu.resumeFixes = Automatische Korrekturen fortsetzen
+menu.settings = Einstellungen
+menu.exit = Glimpse beenden
+
+# ---- toasts
+toast.moved.one = {count} Fenster verschoben, damit es erreichbar bleibt
+toast.moved.other = {count} Fenster verschoben, damit sie erreichbar bleiben
+toast.display.one = Anzeige geändert: {count} Fenster verschoben
+toast.display.other = Anzeige geändert: {count} Fenster verschoben
+toast.arranged.one = {count} Fenster angeordnet
+toast.arranged.other = {count} Fenster angeordnet
+toast.allInReach = Alle Fenster sind schon erreichbar
+toast.layout = Diese Bildschirmanordnung gab es schon einmal
+toast.layoutHint = Fenster wieder dorthin setzen, wo sie damals waren?
+toast.restore = Wiederherstellen
+toast.undo = Rückgängig
+
+# ---- while dragging
+drag.keeps = Dieses Fenster behält einen sichtbaren Rand
+drag.noGlimpse = Dieses Fenster hätte keinen sichtbaren Rand
+drag.stay.one = {count} bleibt sichtbar
+drag.stay.other = {count} bleiben sichtbar
+drag.move.one = {count} wird beim Loslassen verschoben
+drag.move.other = {count} werden beim Loslassen verschoben
+drag.hide.one = {count} wäre verdeckt
+drag.hide.other = {count} wären verdeckt
+drag.peek = {title} schaut hier hervor
+drag.movesPx = wird beim Loslassen um {px} px verschoben
+drag.wouldBeHidden = Wäre verdeckt
+drag.reason.elevated = Administrator-Fenster lassen sich nicht verschieben
+drag.reason.stubborn = Dieses Fenster springt immer wieder zurück
+drag.reason.excluded = In den Einstellungen ausgeschlossen
+drag.reason.hung = Die App reagiert nicht
+drag.reason.topmost = Fenster immer im Vordergrund
+drag.reason.noSpace = Keine kleine Verschiebung schafft einen sichtbaren Rand
+drag.reason.guide = Der Modus Zeigen verschiebt nie Fenster
+drag.reason.paused = Glimpse ist pausiert
+drag.reason.limit = Nicht unter den zuletzt benutzten Fenstern
+drag.reason.shift = Umschalt: dieses Loslassen wird nicht korrigiert
+drag.guide = Kante hier ablegen: nichts muss verschoben werden
+drag.minSize = Wächst zurück auf {width} × {height}
+
+# ---- X-ray
+xray.search = Tippen, um ein Fenster zu finden
+xray.matches.one = {count} Treffer
+xray.matches.other = {count} Treffer
+xray.noMatch = Kein Treffer
+xray.enter = Eingabe
+xray.minimized = Minimiert
+xray.hint = **Klicken** Sie ein Fenster an oder drücken Sie seine **Nummer** · **tippen** zum Filtern · **Umschalt+Klick** gibt ihm auch einen sichtbaren Rand · **Esc** schließt
+xray.empty = Keine anderen Fenster geöffnet
+
+# ---- settings window
+settings.title = Glimpse-Einstellungen
+settings.size.title = Größe des sichtbaren Rands
+settings.size.subtitle = Wie viel von jedem Fenster sichtbar bleibt, je Bildschirm skaliert
+settings.size.small = Klein · {px} px
+settings.size.medium = Mittel · {px} px
+settings.size.large = Groß · {px} px
+settings.size.custom = Eigene · {px} px
+settings.mode.title = Wenn ein Fenster verschwinden würde
+settings.mode.guide = Zeigen
+settings.mode.guide.desc = Hinweise und X-Ray anzeigen. Nie Fenster verschieben.
+settings.mode.assist = Helfen
+settings.mode.assist.desc = Kleine Korrekturen nach dem Ablegen und bei neuen Fenstern, mit Rückgängig.
+settings.mode.strict = Streng
+settings.mode.strict.desc = Korrigiert auch Verschiebungen durch Apps. Kann Fenster verkleinern.
+settings.recommended = Empfohlen
+settings.new.title = Neue Fenster
+settings.new.place = Neue Fenster so platzieren, dass alle sichtbaren Ränder frei bleiben
+settings.new.remember = Fenstergrößen je App merken
+settings.min.title = Mindestgröße für Fenster
+settings.min.subtitle = Fenster wachsen nach dem Verkleinern zurück · die erste passende Titelregel gilt
+settings.min.add = + Regel hinzufügen
+settings.min.pattern = Titelmuster (regulärer Ausdruck)
+settings.min.note = Notiz
+settings.min.invalid = Kein gültiges Muster: {error}
+settings.min.remove = Regel entfernen
+settings.xray.title = X-Ray: jedes Fenster erreichen
+settings.xray.hotkey = Tastenkombination
+settings.xray.none = Keine
+settings.xray.test = Testen
+settings.xray.change = Ändern
+settings.xray.record = Andere Kombination aufnehmen…
+settings.xray.noHotkey = Keine Tastenkombination
+settings.xray.pressNow = Jetzt {hotkey} drücken…
+settings.xray.recordNow = Drücken Sie die neue Kombination. Esc bricht ab.
+settings.xray.arrived = {hotkey} kommt in dieser Sitzung an.
+settings.xray.silent = {hotkey} kam nicht an: Ihr Remote-Client oder Ihr PC fängt sie ab. Versuchen Sie {next}.
+settings.xray.taken = {hotkey} wird in dieser Sitzung schon von einem anderen Programm verwendet.
+settings.xray.types = {hotkey} tippt „{char}“ mit dem Tastaturlayout {layout}.
+settings.xray.corner = Aktive Ecke
+settings.xray.cornerDesc = {corner}, nach 0,4 s
+settings.xray.cornerOff = Aus
+settings.xray.minimized = Minimierte Fenster zeigen
+settings.corner.topLeft = oben links
+settings.corner.topRight = oben rechts
+settings.corner.bottomLeft = unten links
+settings.corner.bottomRight = unten rechts
+settings.exclude.title = Diese nie verschieben
+settings.exclude.subtitle = Ausgeschlossene Apps behalten ihren Platz
+settings.exclude.pick = Fenster auswählen
+settings.exclude.pickHint = Maustaste halten und auf ein Fenster ziehen
+settings.exclude.add = App hinzufügen…
+settings.exclude.prompt = Programmdateiname, zum Beispiel teams.exe
+settings.exclude.remove = Entfernen
+settings.exclude.titleTip = Fenster, deren Titel zu {pattern} passt
+settings.start = Mit Windows starten
+settings.language = Sprache
+settings.language.auto = Automatisch · {language}
+settings.saved = Gespeichert in Glimpse.ini neben {program}
+settings.savedPath = Gespeichert in {path}
+settings.readOnly = {path} kann nicht geschrieben werden: Einstellungen nur lesbar
+settings.defaults = Glimpse.ini kann nicht gelesen werden: Standardeinstellungen aktiv
+settings.done = Fertig

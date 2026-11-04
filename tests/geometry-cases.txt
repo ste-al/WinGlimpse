@@ -1,0 +1,415 @@
+# Glimpse geometry test cases.
+# Shared by every build of Glimpse: Glimpse.exe /selftest and Glimpse.ps1 -SelfTest run this file,
+# and a future native build must pass it too, so all builds make the same decisions.
+# The algorithm these cases pin down is described in docs/algorithm.md.
+#
+# Units are physical pixels. Rectangles are: left top right bottom (right and bottom exclusive).
+#
+#   case <name>
+#   monitor <l> <t> <r> <b> [work <l> <t> <r> <b>] [dpi <n>]
+#                     default: one monitor 0 0 1920 1080, work area 0 0 1920 1040, dpi 96
+#   glimpse <px>      glimpse size at 100% scaling (default 50)
+#   mode guide|assist|strict          (default assist)
+#   place 0|1         PlaceNewWindows (default 1)
+#   window <id> <l> <t> <r> <b> [flags]
+#       elevated stubborn excluded hung    an obstacle: checked, never moved
+#       topmost                            an obstacle that is not checked (always on top)
+#       maximized notcounted               ignored (exempt, or beyond MaxWindows)
+#       noresize                           no resize border
+#       min=<w>x<h>                        minimum size from a title rule, px at 100%
+#       caption=<px> icon=<px>             caption-button and window-menu icon width at 100%
+#       prev=<l>,<t>,<r>,<b>               work area it was on before a display change
+#   already <id>      already fixed once during this user action
+#   action check | drop <id> [edges=LTRB] [from=l,t,r,b] | new <id> | restore <id>
+#        | appmove <id> | appresize <id> | display | arrange | glimpse <id> | guides <id> <range>
+#   expect zone <id> top|bottom|left|right|none [quality]   (before the action for check, else after)
+#   expect free <id> | hidden <id> [reason] | at <id> <l> <t> <r> <b> | moved <id> | unchanged <id>
+#   expect moves <n> | why <id> <minsize|glimpse|place|shrink|cascade|rescue>
+#   expect guide <top|bottom|left|right> <coord> | guides <n>
+#   end
+
+# ---------------------------------------------------------------- the first rule
+
+case side by side windows both keep their title strip
+window A 100 100 700 600
+window B 800 100 1400 600
+action check
+expect zone A top 3
+expect zone B top 3
+end
+
+case a window fully covered by another has no glimpse
+window A 200 200 600 500
+window B 100 100 800 700
+action check
+expect zone A none
+expect zone B top 3
+end
+
+case stacking order does not matter: a small window inside a big one has no glimpse
+window B 200 200 600 500
+window A 100 100 800 700
+action check
+expect zone B none
+expect zone A top
+end
+
+case caption buttons never count as a glimpse
+window A 100 100 700 600
+window B1 100 100 560 700
+window B2 560 150 800 700
+action check
+expect zone A none
+end
+
+case the window-menu icon counts only as a last resort
+window A 100 100 700 600
+window B1 150 100 800 700
+window B2 0 150 800 700
+action check
+expect zone A top 1
+end
+
+case a free bottom corner is a glimpse
+window A 100 100 700 600
+window B 50 50 800 550
+action check
+expect zone A bottom 2
+end
+
+case a free right edge below the title bar is a glimpse
+window A 100 100 700 600
+window B 50 50 650 650
+window C 600 560 800 700
+action check
+expect zone A right 2
+end
+
+case a glimpse under the taskbar does not count
+window A 100 900 900 1080
+window B 0 850 1000 1000
+action check
+expect zone A none
+end
+
+case glimpse size scales with the monitor: 60 px is enough at 100%
+window A 100 100 700 600
+window B 50 160 800 700
+action check
+expect zone A top 3
+end
+
+case glimpse size scales with the monitor: 60 px is not enough at 150%
+monitor 0 0 2880 1620 work 0 0 2880 1560 dpi 144
+window A 100 100 1000 900
+window B 50 160 1200 1000
+action check
+expect zone A none
+end
+
+case a glimpse must lie inside one monitor's work area
+monitor 0 0 1920 1080 work 0 0 1920 1040
+monitor 1920 0 3840 1080 work 1920 0 3840 1040
+window A 1700 100 2100 500
+window B 1600 50 1880 600
+action check
+expect zone A bottom 2
+end
+
+case maximized windows are exempt and block nothing
+window M 0 0 1920 1040 maximized
+window A 100 100 700 600
+action check
+expect zone A top 3
+end
+
+case always-on-top windows block glimpses but are not checked
+window T 100 100 700 600 topmost
+window A 150 150 650 550
+action check
+expect zone A none
+expect moves 0
+end
+
+# ---------------------------------------------------------------- after a drop
+
+case drop: the covered window is nudged down by the smallest move
+window A 300 300 800 700
+window D 250 150 1100 680
+action drop D from=1200,150,2050,680
+expect at A 300 330 800 730
+expect why A glimpse
+expect moves 1
+expect free A
+expect unchanged D
+end
+
+case drop: windows yield smallest first and nobody loses a glimpse
+window A 300 300 600 600
+window B 700 300 1100 620
+window D 250 200 1150 580
+action drop D from=250,700,1150,1080
+expect at A 300 330 600 630
+expect at B 700 310 1100 630
+expect moves 2
+expect free A
+expect free B
+end
+
+case drop: a nudge never exceeds a quarter of the shorter side
+window A 300 300 700 600
+window D 200 200 900 640
+action drop D from=1000,200,1700,640
+expect hidden A noSpace
+expect moves 0
+end
+
+case drop: an elevated window cannot be moved and would be hidden
+window E 1300 400 1700 700 elevated
+window D 1200 300 1800 800
+action drop D from=200,300,800,800
+expect hidden E elevated
+expect moves 0
+end
+
+case drop: a stubborn window is left alone
+window S 300 300 800 700 stubborn
+window D 250 150 1100 680
+action drop D
+expect hidden S stubborn
+expect moves 0
+end
+
+case drop: an excluded app keeps its place
+window X 300 300 800 700 excluded
+window D 250 150 1100 680
+action drop D
+expect hidden X excluded
+expect moves 0
+end
+
+case drop: windows the drop did not touch stay as they are
+window A 100 100 500 400
+window B 100 100 500 400
+window D 1200 500 1600 900
+action drop D from=1100,500,1500,900
+expect moves 0
+expect hidden A
+expect hidden B
+end
+
+case drop: at most one fix per window per user action
+window A 300 300 800 700
+window D 250 150 1100 680
+already A
+action drop D
+expect hidden A noSpace
+expect moves 0
+end
+
+case drop: the dropped window itself stays even without a glimpse
+window B 100 100 900 700
+window D 200 200 600 500
+action drop D from=1000,200,1400,500
+expect hidden D anchor
+expect unchanged D
+expect unchanged B
+end
+
+case guide mode shows but never moves
+mode guide
+window A 300 300 800 700
+window D 250 150 1100 680
+action drop D
+expect hidden A guide
+expect moves 0
+end
+
+case strict: shrinking cannot help a fully covered window
+mode strict
+window A 300 300 700 600
+window D 200 200 900 640
+window W1 200 640 900 1000
+window W2 0 0 200 1040
+action drop D
+expect moves 0
+expect hidden A
+end
+
+# ---------------------------------------------------------------- minimum size
+
+case minimum size: the dragged left edge moves back
+window A 500 300 650 700 min=200x200
+action drop A edges=L from=450,300,650,700
+expect at A 450 300 650 700
+expect why A minsize
+end
+
+case minimum size: the dragged right edge moves back
+window A 500 300 650 700 min=200x200
+action drop A edges=R
+expect at A 500 300 700 700
+end
+
+case minimum size: a new window grows with its top-left corner fixed, scaled to 150%
+monitor 0 0 2880 1620 work 0 0 2880 1560 dpi 144
+window A 500 300 750 700 min=200x200
+action new A
+expect at A 500 300 800 700
+end
+
+case minimum size: a rule from a title pattern, scaled to 100%
+window A 500 300 800 600 min=480x360
+action appresize A
+expect at A 500 300 980 660
+end
+
+case minimum size: growing shifts the window inward at the work-area edge
+window A 1800 300 1900 600 min=200x200
+action appresize A
+expect at A 1720 300 1920 600
+end
+
+case minimum size: a work area smaller than the minimum is filled
+monitor 0 0 800 600 work 0 0 800 600
+window A 100 100 300 500 min=1000x400
+action appresize A
+expect at A 0 100 800 500
+end
+
+case minimum size: fixed-size windows are left alone
+window A 500 300 650 700 noresize min=200x200
+action appresize A
+expect moves 0
+end
+
+case minimum size: guide mode never resizes
+mode guide
+window A 500 300 650 700 min=200x200
+action appresize A
+expect moves 0
+end
+
+# ---------------------------------------------------------------- new and restored windows
+
+case new window: nothing to do when every glimpse stays
+window A 100 100 700 600
+window N 800 100 1400 600
+action new N
+expect moves 0
+end
+
+case new window: an exact duplicate moves to the nearest spot at the same size
+window A 100 100 900 700
+window N 100 100 900 700
+action new N
+expect at N 50 100 850 700
+expect why N place
+expect free A
+expect free N
+expect unchanged A
+end
+
+case new window: placement can be switched off
+place 0
+window A 100 100 900 700
+window N 100 100 900 700
+action new N
+expect moves 0
+end
+
+case restored window: yields like a new one
+window A 100 100 900 700
+window R 100 120 900 720
+action restore R
+expect at R 100 150 900 750
+expect free A
+expect free R
+end
+
+case strict: a new window may shrink to 70% when no spot fits
+mode strict
+monitor 0 0 1000 800 work 0 0 1000 800
+window A 0 0 1000 400
+window N 0 0 1000 800
+action new N
+expect at N 0 0 700 560
+expect why N shrink
+expect free A
+end
+
+case assist: a new window never shrinks
+monitor 0 0 1000 800 work 0 0 1000 800
+window A 0 0 1000 400
+window N 0 0 1000 800
+action new N
+expect unchanged N
+expect hidden A
+end
+
+case app move: assist leaves it, strict lets the mover yield
+mode strict
+window A 100 100 900 700
+window M 100 100 900 700
+action appmove M
+expect moved M
+expect free A
+expect free M
+end
+
+case app move in assist mode is not fixed
+window A 100 100 900 700
+window M 100 100 900 700
+action appmove M
+expect moves 0
+end
+
+case x-ray shift+click gives a covered window a glimpse
+window B 100 100 900 700
+window A 300 300 600 500
+action glimpse A
+expect moved A
+expect free A
+expect free B
+end
+
+# ---------------------------------------------------------------- arrange now and display changes
+
+case arrange now: fixes every window, smallest first
+window A 100 100 500 400
+window B 110 110 510 410
+action arrange
+expect at A 100 60 500 360
+expect free B
+expect moves 1
+end
+
+case display change: an off-screen window comes back at the same relative position
+window A 2100 200 2700 700 prev=1920,0,3840,1040
+action display
+expect at A 180 200 780 700
+expect why A rescue
+end
+
+case display change: a window larger than the new screen shrinks to fit
+monitor 0 0 1366 768 work 0 0 1366 728
+window A 1500 100 3300 1100 prev=1920,0,3840,1040
+action display
+expect at A 0 0 1366 728
+end
+
+case display change: elevated windows are not rescued
+window E 2100 200 2700 700 elevated prev=1920,0,3840,1040
+action display
+expect moves 0
+end
+
+# ---------------------------------------------------------------- snap guides
+
+case snap guide: an edge that just clears a neighbour's glimpse
+window A 100 100 700 600
+window D 400 120 900 500
+action guides D 60
+expect guide top 150
+expect guides 1
+end

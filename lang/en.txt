@@ -1,0 +1,148 @@
+# Glimpse texts: English (the source for every translation).
+# Format: key = text, UTF-8. {name} is a placeholder; keep it as it is.
+# Plural keys end in .one, .few, .many or .other (CLDR categories); \n is a line break.
+_name = English
+
+# ---- general
+windows.one = {count} window
+windows.other = {count} windows
+
+# ---- tray icon and menu
+status.guarding.one = Guarding {count} window
+status.guarding.other = Guarding {count} windows
+status.allInReach = all in reach
+status.hidden.one = {count} window reachable through X-ray
+status.hidden.other = {count} windows reachable through X-ray
+status.paused = Paused until {time}
+status.pausedTomorrow = Paused until tomorrow
+status.guide = Guide mode: feedback and X-ray only
+status.suspended = Automatic fixes paused: too many moves in a short time
+status.overLimit = Automatic fixes cover the {count} most recently used windows
+status.invalidPattern = A title pattern in Glimpse.ini is not valid
+status.iniDefaults = Glimpse.ini cannot be read: using built-in defaults
+status.hotkeyTaken = The X-ray hotkey {hotkey} is used by another program
+status.idle = Idle while the session is locked or disconnected
+menu.xray = X-ray: show every window
+menu.arrange = Arrange now
+menu.undo = Undo last fix
+menu.pause = Pause
+menu.pauseHint = 15 min · 1 h · until tomorrow
+menu.pause15 = 15 min
+menu.pause60 = 1 h
+menu.pauseTomorrow = Until tomorrow
+menu.resume = Resume
+menu.resumeFixes = Resume automatic fixes
+menu.settings = Settings
+menu.exit = Exit Glimpse
+
+# ---- toasts
+toast.moved.one = Moved {count} window to keep it in reach
+toast.moved.other = Moved {count} windows to keep them in reach
+toast.display.one = Display changed: {count} window moved
+toast.display.other = Display changed: {count} windows moved
+toast.arranged.one = Arranged {count} window
+toast.arranged.other = Arranged {count} windows
+toast.allInReach = Every window is already in reach
+toast.layout = This display setup was used before
+toast.layoutHint = Put windows back where they were on it?
+toast.restore = Restore
+toast.undo = Undo
+
+# ---- while dragging
+drag.keeps = This window keeps a glimpse
+drag.noGlimpse = This window would have no glimpse
+drag.stay.one = {count} stays visible
+drag.stay.other = {count} stay visible
+drag.move.one = {count} moves on drop
+drag.move.other = {count} move on drop
+drag.hide.one = {count} would be hidden
+drag.hide.other = {count} would be hidden
+drag.peek = {title} will peek out here
+drag.movesPx = moves {px} px on drop
+drag.wouldBeHidden = Would be hidden
+drag.reason.elevated = Admin windows can't be moved
+drag.reason.stubborn = This window keeps moving back
+drag.reason.excluded = Excluded in Settings
+drag.reason.hung = The app is not responding
+drag.reason.topmost = Always-on-top window
+drag.reason.noSpace = No small move frees a glimpse
+drag.reason.guide = Guide mode never moves windows
+drag.reason.paused = Glimpse is paused
+drag.reason.limit = Not among the most recently used windows
+drag.reason.shift = Shift: this drop skips the fix
+drag.guide = Drop edge here: nothing needs to move
+drag.minSize = Grows back to {width} × {height}
+
+# ---- X-ray
+xray.search = Type to find a window
+xray.matches.one = {count} match
+xray.matches.other = {count} matches
+xray.noMatch = No match
+xray.enter = Enter
+xray.minimized = Minimized
+xray.hint = **Click** a window or press its **number** · **type** to filter · **Shift+click** also gives it a glimpse · **Esc** closes
+xray.empty = No other windows are open
+
+# ---- settings window
+settings.title = Glimpse settings
+settings.size.title = Glimpse size
+settings.size.subtitle = How much of every window stays visible, scaled per monitor
+settings.size.small = Small · {px} px
+settings.size.medium = Medium · {px} px
+settings.size.large = Large · {px} px
+settings.size.custom = Custom · {px} px
+settings.mode.title = When a window would disappear
+settings.mode.guide = Guide
+settings.mode.guide.desc = Show feedback and X-ray. Never move windows.
+settings.mode.assist = Assist
+settings.mode.assist.desc = Small fixes after drops and new windows, with Undo.
+settings.mode.strict = Strict
+settings.mode.strict.desc = Also fix moves made by apps. May shrink windows.
+settings.recommended = Recommended
+settings.new.title = New windows
+settings.new.place = Place new windows so every glimpse stays visible
+settings.new.remember = Remember window sizes per app
+settings.min.title = Minimum window size
+settings.min.subtitle = Windows are grown back after a resize · the first matching title wins
+settings.min.add = + Add rule
+settings.min.pattern = Title pattern (regular expression)
+settings.min.note = Note
+settings.min.invalid = Not a valid pattern: {error}
+settings.min.remove = Remove this rule
+settings.xray.title = X-ray: reach any window
+settings.xray.hotkey = Hotkey
+settings.xray.none = None
+settings.xray.test = Press to test
+settings.xray.change = Change
+settings.xray.record = Record another combination…
+settings.xray.noHotkey = No hotkey
+settings.xray.pressNow = Press {hotkey} now…
+settings.xray.recordNow = Press the new combination. Esc cancels.
+settings.xray.arrived = {hotkey} arrives in this session.
+settings.xray.silent = {hotkey} did not arrive: your remote client or your PC keeps it. Try {next}.
+settings.xray.taken = {hotkey} is already used by another program in this session.
+settings.xray.types = {hotkey} types “{char}” with the {layout} keyboard layout.
+settings.xray.corner = Hot corner
+settings.xray.cornerDesc = {corner}, after 0.4 s
+settings.xray.cornerOff = Off
+settings.xray.minimized = Show minimized windows
+settings.corner.topLeft = top-left
+settings.corner.topRight = top-right
+settings.corner.bottomLeft = bottom-left
+settings.corner.bottomRight = bottom-right
+settings.exclude.title = Never move these
+settings.exclude.subtitle = Excluded apps keep their place
+settings.exclude.pick = Pick a window
+settings.exclude.pickHint = Hold the mouse button and drag onto a window
+settings.exclude.add = Add app…
+settings.exclude.prompt = Program file name, for example teams.exe
+settings.exclude.remove = Remove
+settings.exclude.titleTip = Windows whose title matches {pattern}
+settings.start = Start with Windows
+settings.language = Language
+settings.language.auto = Automatic · {language}
+settings.saved = Saved to Glimpse.ini next to {program}
+settings.savedPath = Saved to {path}
+settings.readOnly = {path} cannot be written: settings are read-only
+settings.defaults = Glimpse.ini cannot be read: built-in defaults are in use
+settings.done = Done

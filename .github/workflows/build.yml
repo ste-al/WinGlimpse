@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Build and self-test (Linux, .NET SDK + Mono)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Mono and Xvfb
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mono-complete xvfb > /dev/null
+
+      - name: dist/ was built from these sources
+        run: ./build.sh --check-dist
+
+      - name: Build x64 and ARM64 (C# 5), self-test, language check, previews
+        run: ./build.sh --no-dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            out/x64
+            out/arm64
+            out/previews
+            out/selftest.txt
+            out/checklang.txt
+          if-no-files-found: error
+
+  windows:
+    name: ${{ matrix.os }} (${{ matrix.exe }})
+    needs: linux
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            exe: x64
+          - os: windows-2025
+            exe: x64
+          - os: windows-11-arm
+            exe: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: out
+
+      - name: Build with the C# compiler that ships with Windows (C# 5, as on the servers)
+        shell: cmd
+        run: build.cmd anycpu
+
+      - name: Self-test, in-box build
+        shell: powershell
+        run: |
+          $p = Start-Process .\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-inbox.txt
+          Get-Content selftest-inbox.txt
+          exit $p.ExitCode
+
+      - name: Self-test, ${{ matrix.exe }} build from Linux
+        shell: powershell
+        run: |
+          $p = Start-Process out\${{ matrix.exe }}\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-${{ matrix.exe }}.txt
+          Get-Content selftest-${{ matrix.exe }}.txt
+          exit $p.ExitCode
+
+      - name: Self-test, PowerShell build (Windows PowerShell 5.1, Add-Type)
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Glimpse.ps1 -SelfTest -Cases tests\geometry-cases.txt | Tee-Object selftest-ps1.txt
+          exit $LASTEXITCODE
+
+      - name: Language files
+        shell: powershell
+        run: |
+          $p = Start-Process .\Glimpse.exe -ArgumentList '/checklang' -Wait -PassThru -NoNewWindow -RedirectStandardOutput checklang.txt
+          Get-Content checklang.txt
+          exit $p.ExitCode
+
+      - name: Preview images
+        shell: powershell
+        run: |
+          foreach ($lang in 'en', 'de', 'cs', 'sk', 'qps') {
+            $p = Start-Process .\Glimpse.exe -ArgumentList "/render:previews\$lang", "/renderlang:$lang" -Wait -PassThru -NoNewWindow -RedirectStandardOutput "render-$lang.txt"
+            Get-Content "render-$lang.txt"
+          }
+
+      - name: End-to-end smoke test (real windows, drag and drop, X-ray, settings)
+        continue-on-error: true
+        shell: powershell
+        run: .\tests\e2e.ps1 -Exe out\${{ matrix.exe }}\Glimpse.exe -Out e2e
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.os }}
+          path: |
+            selftest-*.txt
+            checklang.txt
+            previews
+            e2e
+            Glimpse.exe
