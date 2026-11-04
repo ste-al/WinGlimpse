@@ -53,7 +53,9 @@ the internet-zone mark (file Properties → Unblock).
 
 1. Unzip a package into a folder you can write to, for example `%LOCALAPPDATA%\Glimpse`.
 2. Run `Glimpse.exe` (or, for the PowerShell build,
-   `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File Glimpse.ps1`).
+   `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File Glimpse.ps1 -Background`;
+   with `-Background` the script moves itself into a `powershell.exe` without a console window, so no
+   window stays open, also where Windows Terminal is the default terminal).
 3. Glimpse lives in the notification area. **Left-click** the icon for X-ray, **right-click** for
    the menu: X-ray, Arrange now, Undo last fix, Pause (15 min, 1 h, until tomorrow), Settings, Exit.
 
@@ -125,8 +127,9 @@ positions per display setup for the session; when a known setup returns, a toast
 |---|---|
 | ![Settings window, light theme](docs/images/settings.png) | ![Settings window, dark theme](docs/images/settings-dark.png) |
 
-The settings window writes to `Glimpse.ini`; Glimpse also reloads the file when you edit it. All
-options:
+The settings window writes to `Glimpse.ini`; Glimpse also reloads the file when you edit it. It
+works from the keyboard (Tab, arrow keys, Space; Space cycles the hot corner, Delete removes an
+excluded app), and its controls tell screen readers their name, role and state. All options:
 
 | Section, key | Values | Default |
 |---|---|---|
@@ -170,7 +173,8 @@ session is locked or disconnected, and needs no admin rights.
   beside it. Settings → Start with Windows (off by default) registers it for that user.
 - **For all users at once**, run [`deploy/Start-Glimpse.cmd`](deploy/Start-Glimpse.cmd) as a logon
   script from a share that holds the Glimpse files. It copies `Glimpse.exe` and `lang\` into each
-  user's folder when they are missing or older, never overwrites a user's `Glimpse.ini`, and starts
+  user's folder when they are missing or differ from the share (compared by content: every file in
+  the packages has the same date), never overwrites a user's `Glimpse.ini`, and starts
   Glimpse. Set `GLIMPSE_HOME` for another per-user folder and `GLIMPSE_INI` to pass `/ini:`, for
   example `%APPDATA%\Glimpse\Glimpse.ini` so settings roam with the profile.
   [`deploy/Start-Glimpse-ps1.cmd`](deploy/Start-Glimpse-ps1.cmd) does the same for the PowerShell build.
@@ -184,6 +188,9 @@ session is locked or disconnected, and needs no admin rights.
   without activation or z-order changes. It has no keyboard hook and no network access. It writes
   only its settings file, `%LOCALAPPDATA%\Glimpse\Glimpse.log` (rotated at 1 MB) and the size-memory
   file next to the log.
+- To bring X-ray or Settings to the front when Windows would refuse (the input that opened them went
+  to another window), Glimpse sends one empty mouse input: no movement, no click. Windows only lets
+  the program that received the last input take the focus.
 - Windows of elevated processes cannot be moved by a non-elevated process; Glimpse compares
   integrity levels and treats them as fixed obstacles.
 - Where AppLocker or WDAC enforce rules, allow Glimpse with a path rule for its folder or a hash rule

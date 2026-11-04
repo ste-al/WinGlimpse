@@ -193,6 +193,19 @@ bool WriteFileBytes(const wstr& p, const std::string& data) {
     return ok;
 }
 
+// A temporary file next to it replaces the file, so it is either the old or the new content. Falls back
+// to writing in place when the folder does not allow new files (a file made writable in a read-only folder).
+bool WriteFileAtomic(const wstr& p, const std::string& data) {
+    wstr tmp = p + L".tmp";
+    if (WriteFileBytes(tmp, data)) {
+        bool exists = FileExists(p);
+        if (exists && ReplaceFileW(p.c_str(), tmp.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr)) return true;
+        if (MoveFileExW(tmp.c_str(), p.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+        DeleteFileW(tmp.c_str());
+    }
+    return WriteFileBytes(p, data);
+}
+
 bool AppendFileBytes(const wstr& p, const std::string& data) {
     HANDLE h = CreateFileW(p.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS, 0, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
@@ -950,7 +963,7 @@ bool SettingsStore::Save(const Settings& s) {
     if (!writable) return false;
     s.WriteTo(ini);
     std::string data = ini.ToBytes();
-    if (!Util::WriteFileBytes(filePath, data)) {
+    if (!Util::WriteFileAtomic(filePath, data)) {
         Log::Warn(L"cannot write " + filePath);
         writable = false;
         return false;
@@ -1402,7 +1415,7 @@ Options Options::Parse(const std::vector<wstr>& args) {
         auto unquote = [](wstr v) { while (!v.empty() && v.front() == L'"') v.erase(v.begin()); while (!v.empty() && v.back() == L'"') v.pop_back(); return v; };
         name = Util::Lower(name);
         if (name == L"ini") {
-            if (!hasValue && i + 1 < args.size()) { value = args[++i]; hasValue = true; }
+            if (!hasValue && i + 1 < args.size()) value = args[++i];
             if (value.empty()) { o.error = L"/ini needs a path, for example /ini:%APPDATA%\\Glimpse\\Glimpse.ini"; return o; }
             o.iniArgument = unquote(value);
         } else if (name == L"selftest") {
@@ -1413,7 +1426,7 @@ Options Options::Parse(const std::vector<wstr>& args) {
         else if (name == L"dumplang") o.dumpLang = value.empty() ? L"en.txt" : unquote(value);
         else if (name == L"dumpini") o.dumpIni = value.empty() ? L"Glimpse.ini" : unquote(value);
         else if (name == L"render") {
-            if (!hasValue && i + 1 < args.size()) value = args[++i];
+            if (!hasValue && i + 1 < args.size() && !args[i + 1].empty() && args[i + 1][0] != L'/' && args[i + 1][0] != L'-') value = args[++i];
             o.render = value.empty() ? L"previews" : unquote(value);
         } else if (name == L"renderlang") o.renderLang = value;
         else if (name == L"settings") o.showSettings = true;

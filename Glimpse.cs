@@ -206,7 +206,7 @@ namespace Glimpse
                     case "dumplang": o.DumpLang = string.IsNullOrEmpty(value) ? "en.txt" : value.Trim('"'); break;
                     case "dumpini": o.DumpIni = string.IsNullOrEmpty(value) ? "Glimpse.ini" : value.Trim('"'); break;
                     case "render":
-                        if (value == null && i + 1 < args.Length) value = args[++i];
+                        if (value == null && i + 1 < args.Length && args[i + 1].Length > 0 && args[i + 1][0] != '/' && args[i + 1][0] != '-') value = args[++i];
                         o.Render = string.IsNullOrEmpty(value) ? "previews" : value.Trim('"');
                         break;
                     case "renderlang": o.RenderLanguage = value; break;
@@ -595,9 +595,21 @@ namespace Glimpse
         public struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData, flags, time; public IntPtr extra; }
 
         /// <summary>Lets this process take the foreground when no input of ours caused it (hot corner).</summary>
+        // ---- synthesized input (only an empty mouse event, see ForceForeground)
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr extra; }
+        [StructLayout(LayoutKind.Sequential)]
+        public struct INPUT { public uint type; public MOUSEINPUT mi; }   // MOUSEINPUT is the largest member of the union
+        [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+
         public static void ForceForeground(IntPtr hwnd)
         {
             if (!IsWindows || hwnd == IntPtr.Zero) return;
+            if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
+            // Windows lets the process that received the last input event take the foreground. When the
+            // input that opened us has already gone elsewhere (the hotkey's key-up events, a slow start),
+            // an input event of our own makes us that process: an empty mouse event, no movement, no button.
+            try { SendInput(1, new INPUT[1], Marshal.SizeOf(typeof(INPUT))); } catch { }
             if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
             IntPtr fg = GetForegroundWindow();
             uint pid;
@@ -739,6 +751,26 @@ namespace Glimpse
         {
             if (s == null) return "";
             return s.Length <= max ? s : s.Substring(0, Math.Max(0, max - 1)) + "\u2026";
+        }
+
+        /// <summary>Writes a file so that it is either the old or the new content, never half of it:
+        /// a temporary file next to it replaces it. Falls back to writing in place when the folder
+        /// does not allow new files (a file made writable for users in a read-only folder).</summary>
+        public static void WriteAtomic(string path, byte[] data)
+        {
+            string tmp = path + ".tmp";
+            try
+            {
+                File.WriteAllBytes(tmp, data);
+                if (File.Exists(path)) File.Replace(tmp, path, null, true);
+                else File.Move(tmp, path);
+                return;
+            }
+            catch (Exception)
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+            }
+            File.WriteAllBytes(path, data);
         }
     }
 
@@ -1557,7 +1589,7 @@ namespace Glimpse
             {
                 s.WriteTo(ini);
                 byte[] data = ini.ToBytes();
-                File.WriteAllBytes(FilePath, data);
+                Util.WriteAtomic(FilePath, data);
                 lastHash = Hash(data);
                 var fi = new FileInfo(FilePath);
                 lastWrite = fi.LastWriteTimeUtc;
@@ -2225,6 +2257,8 @@ settings.min.subtitle = Windows are grown back after a resize \u00b7 the first m
 settings.min.add = + Add rule
 settings.min.pattern = Title pattern (regular expression)
 settings.min.note = Note
+settings.min.width = Minimum width in pixels
+settings.min.height = Minimum height in pixels
 settings.min.invalid = Not a valid pattern: {error}
 settings.min.remove = Remove this rule
 settings.xray.title = X-ray: reach any window
@@ -4422,7 +4456,7 @@ settings.done = Done
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.WriteAllBytes(path, ini.ToBytes());
+                Util.WriteAtomic(path, ini.ToBytes());
                 dirty = false;
             }
             catch (Exception ex) { Log.Warn("cannot write " + path + ": " + ex.Message); }
@@ -7417,6 +7451,46 @@ settings.done = Done
         {
             if (Focused && ShowFocusCues) Draw.Stroke(g, RectangleF.Inflate(r, -1, -1), radius, Theme.Accent, 1.5f * K, true);
         }
+
+        // ---- accessibility: custom-drawn controls tell screen readers their name, role and checked state
+
+        /// <summary>The name a screen reader announces (set by the page; controls with a label default to it).</summary>
+        public string AccName;
+        protected virtual string AccessibleText { get { return AccName; } }
+        protected virtual bool AccessibleChecked { get { return false; } }
+
+        protected override AccessibleObject CreateAccessibilityInstance() { return new GAccessible(this); }
+
+        public void NotifyAccessibleName() { if (IsHandleCreated) AccessibilityNotifyClients(AccessibleEvents.NameChange, -1); }
+        protected void NotifyAccessibleState() { if (IsHandleCreated) AccessibilityNotifyClients(AccessibleEvents.StateChange, -1); }
+
+        sealed class GAccessible : ControlAccessibleObject
+        {
+            readonly GControl owner;
+            public GAccessible(GControl owner) : base(owner) { this.owner = owner; }
+
+            public override string Name
+            {
+                get
+                {
+                    string n = owner.AccessibleName;
+                    if (!string.IsNullOrEmpty(n)) return n;
+                    n = owner.AccessibleText;
+                    return n ?? base.Name;
+                }
+                set { owner.AccessibleName = value; }
+            }
+
+            public override AccessibleStates State
+            {
+                get
+                {
+                    AccessibleStates s = base.State;
+                    if (owner.AccessibleChecked) s |= AccessibleStates.Checked;
+                    return s;
+                }
+            }
+        }
     }
 
     internal sealed class GLabel : GControl
@@ -7426,7 +7500,8 @@ settings.done = Done
         public Color Ink = Color.Black;
         public bool Wrap;
 
-        public GLabel() { SetStyle(ControlStyles.Selectable, false); TabStop = false; }
+        public GLabel() { SetStyle(ControlStyles.Selectable, false); TabStop = false; AccessibleRole = AccessibleRole.StaticText; }
+        protected override string AccessibleText { get { return Label; } }
 
         public static Size Measure(string text, Font f, int width, bool wrap)
         {
@@ -7447,8 +7522,9 @@ settings.done = Done
     {
         bool on;
         public event EventHandler Changed;
-        public bool On { get { return on; } set { if (on != value) { on = value; Invalidate(); } } }
-        public Toggle() { TabStop = true; Cursor = Cursors.Hand; }
+        public bool On { get { return on; } set { if (on != value) { on = value; Invalidate(); NotifyAccessibleState(); } } }
+        public Toggle() { TabStop = true; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.CheckButton; }
+        protected override bool AccessibleChecked { get { return on; } }
 
         protected override void OnClick(EventArgs e)
         {
@@ -7484,7 +7560,11 @@ settings.done = Done
         public readonly List<string> Items = new List<string>();
         public int Selected;
         public event EventHandler Changed;
-        public Segmented() { TabStop = true; Cursor = Cursors.Hand; }
+        public Segmented() { TabStop = true; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.Slider; }
+        protected override string AccessibleText
+        {
+            get { return Selected >= 0 && Selected < Items.Count ? AccName + ": " + Items[Selected] : AccName; }
+        }
 
         public int PreferredWidth()
         {
@@ -7558,6 +7638,7 @@ settings.done = Done
             if (i == Selected) return;
             Selected = i;
             Invalidate();
+            NotifyAccessibleName();
             var h = Changed;
             if (h != null) h(this, EventArgs.Empty);
         }
@@ -7567,9 +7648,11 @@ settings.done = Done
     {
         public string Title = "", Badge, Desc = "";
         bool chk;
-        public bool Checked { get { return chk; } set { chk = value; Invalidate(); } }
+        public bool Checked { get { return chk; } set { if (chk != value) { chk = value; Invalidate(); NotifyAccessibleState(); } } }
         public event EventHandler Picked;
-        public ModeCard() { TabStop = true; Cursor = Cursors.Hand; }
+        public ModeCard() { TabStop = true; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.RadioButton; }
+        protected override bool AccessibleChecked { get { return chk; } }
+        protected override string AccessibleText { get { return Title + (string.IsNullOrEmpty(Badge) ? "" : ", " + Badge) + ". " + Desc; } }
 
         public static int HeightFor(string title, string badge, string desc, int width, float k)
         {
@@ -7639,7 +7722,8 @@ settings.done = Done
         public string Label = "";
         public bool Bold = true;
         public event EventHandler Clicked;
-        public LinkText() { TabStop = true; Cursor = Cursors.Hand; }
+        public LinkText() { TabStop = true; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.Link; }
+        protected override string AccessibleText { get { return AccName ?? Label; } }
 
         public int PreferredWidth() { return (int)Draw.Measure(Label, Draw.Font(15 * K, Bold)).Width + (int)(6 * K); }
 
@@ -7672,7 +7756,8 @@ settings.done = Done
     internal sealed class KeyCaps : GControl
     {
         public List<string> Keys = new List<string>();
-        public KeyCaps() { SetStyle(ControlStyles.Selectable, false); TabStop = false; }
+        public KeyCaps() { SetStyle(ControlStyles.Selectable, false); TabStop = false; AccessibleRole = AccessibleRole.StaticText; }
+        protected override string AccessibleText { get { return Keys.Count == 0 ? Texts.T("settings.xray.none") : string.Join("+", Keys.ToArray()); } }
 
         public int PreferredWidth()
         {
@@ -7715,7 +7800,7 @@ settings.done = Done
     {
         public Corner Value = Corner.TopLeft;
         public event EventHandler Changed;
-        public CornerPicker() { TabStop = true; Cursor = Cursors.Hand; }
+        public CornerPicker() { TabStop = true; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.SpinButton; }
 
         RectangleF Box { get { return new RectangleF(1, 1, Width - 3, Height - 3); } }
 
@@ -7748,6 +7833,22 @@ settings.done = Done
             if (h != null) h(this, EventArgs.Empty);
             base.OnMouseUp(e);
         }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            // keyboard: Space cycles through the corners and Off
+            if (e.KeyCode == Keys.Space && Enabled)
+            {
+                Corner[] order = { Corner.TopLeft, Corner.TopRight, Corner.BottomRight, Corner.BottomLeft, Corner.Off };
+                int i = Array.IndexOf(order, Value);
+                Value = order[(i + 1) % order.Length];
+                Invalidate();
+                var h = Changed;
+                if (h != null) h(this, EventArgs.Empty);
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
     }
 
     internal sealed class ChipControl : GControl
@@ -7757,7 +7858,7 @@ settings.done = Done
         public string BadgeName = "";
         public event EventHandler Removed;
         RectangleF xr;
-        public ChipControl() { TabStop = true; Cursor = Cursors.Default; }
+        public ChipControl() { TabStop = true; Cursor = Cursors.Default; AccessibleRole = AccessibleRole.ListItem; }
 
         public int PreferredWidth() { return (int)(12 * K + 22 * K + 8 * K + Draw.Measure(Label, Draw.Font(15 * K, false)).Width + 10 * K + 18 * K + 10 * K); }
 
@@ -7800,7 +7901,8 @@ settings.done = Done
         public event Action<Point> Hovering;
         public event Action<Point> Picked;
         bool picking;
-        public TargetButton() { TabStop = true; Cursor = Cursors.Hand; }
+        public TargetButton() { TabStop = true; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.PushButton; }
+        protected override string AccessibleText { get { return Label; } }
 
         public int PreferredWidth() { return (int)(16 * K + 22 * K + 10 * K + Draw.Measure(Label, Draw.Font(15 * K, true)).Width + 18 * K); }
 
@@ -7851,7 +7953,8 @@ settings.done = Done
     {
         public string Label = "";
         public event EventHandler Clicked;
-        public PrimaryButton() { TabStop = true; Cursor = Cursors.Hand; }
+        public PrimaryButton() { TabStop = true; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.PushButton; }
+        protected override string AccessibleText { get { return Label; } }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -8047,6 +8150,17 @@ settings.done = Done
 
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == Native.WM_SETTINGCHANGE && m.LParam != IntPtr.Zero && Marshal.PtrToStringUni(m.LParam) == "ImmersiveColorSet")
+            {
+                // light or dark mode changed: repaint the page in the new theme
+                bool was = Theme.Dark;
+                Theme.Refresh();
+                if (was != Theme.Dark)
+                {
+                    Native.SetDarkTitleBar(Handle, Theme.Dark);
+                    RebuildLater();
+                }
+            }
             if (m.Msg == Native.WM_DPICHANGED)
             {
                 k = (int)(m.WParam.ToInt64() & 0xFFFF) / 96f;
@@ -8122,7 +8236,7 @@ settings.done = Done
                 int yy = y + t.Height + S(2);
                 var sub = Label(T("settings.size.subtitle"), 14.5f, false, Theme.Sub, X0, yy, textW, true, card);
                 yy += sub.Height + S(14);
-                var seg = new Segmented { K = k };
+                var seg = new Segmented { K = k, AccName = T("settings.size.title") };
                 int[] sizes = { Settings.SmallSize, Settings.MediumSize, Settings.LargeSize };
                 seg.Items.Add(Texts.F("settings.size.small", "px", sizes[0]));
                 seg.Items.Add(Texts.F("settings.size.medium", "px", sizes[1]));
@@ -8198,7 +8312,7 @@ settings.done = Done
                     if (at > 0 && edit.MinSizes[at - 1].Pattern == ".*") at--;
                     edit.MinSizes.Insert(at, r);
                     SaveNow();
-                    Build();
+                    RebuildLater();
                 };
                 y += t.Height + S(2);
                 var sub = Label(T("settings.min.subtitle"), 14.5f, false, Theme.Sub, X0, y, IW, true, card);
@@ -8216,25 +8330,29 @@ settings.done = Done
                     pat.Invalid = rule.Regex == null;
                     if (rule.Error != null) tips.SetToolTip(pat.Box, Texts.F("settings.min.invalid", "error", rule.Error));
                     tips.SetToolTip(pat, T("settings.min.pattern"));
+                    pat.Box.AccessibleName = T("settings.min.pattern");
                     x += S(210) + S(14);
                     var wBox = Add(new InputBox(normal, k), x, y, S(68), rowH);
                     wBox.Box.Text = Util.Inv(rule.MinWidth);
+                    wBox.Box.AccessibleName = T("settings.min.width");
                     wBox.Hook();
                     x += S(68);
                     Label("\u00d7", 15, false, Theme.Sub, x + S(4), y + (rowH - S(20)) / 2, S(22), false, card);
                     x += S(26);
                     var hBox = Add(new InputBox(normal, k), x, y, S(68), rowH);
                     hBox.Box.Text = Util.Inv(rule.MinHeight);
+                    hBox.Box.AccessibleName = T("settings.min.height");
                     hBox.Hook();
                     x += S(68);
                     Label("px", 15, false, Theme.Sub, x + S(6), y + (rowH - S(20)) / 2, S(34), false, card);
                     x += S(40);
-                    var rm = new LinkText { Label = "\u00d7", K = k, BackColor = card, Bold = false };
+                    var rm = new LinkText { Label = "\u00d7", K = k, BackColor = card, Bold = false, AccName = T("settings.min.remove") };
                     int rmW = S(26);
                     var note = Add(new InputBox(normal, k), x, y, X0 + IW - rmW - S(10) - x, rowH);
                     note.Box.Text = rule.Note ?? "";
                     note.Hook();
                     tips.SetToolTip(note.Box, T("settings.min.note"));
+                    note.Box.AccessibleName = T("settings.min.note");
                     Add(rm, X0 + IW - rmW, y, rmW, rowH);
                     tips.SetToolTip(rm, T("settings.min.remove"));
                     MinSizeRule r = rule;
@@ -8260,7 +8378,7 @@ settings.done = Done
                     wBox.Box.TextChanged += sizeChanged;
                     hBox.Box.TextChanged += sizeChanged;
                     note.Box.TextChanged += delegate { r.Note = note.Box.Text; ScheduleSave(); };
-                    rm.Clicked += delegate { edit.MinSizes.Remove(r); SaveNow(); Build(); };
+                    rm.Clicked += delegate { edit.MinSizes.Remove(r); SaveNow(); RebuildLater(); };
                     if (rule.Pattern == "^" && focusAfterBuild == null) focusAfterBuild = pat;
                     y += rowH + S(8);
                 }
@@ -8277,6 +8395,8 @@ settings.done = Done
                 Label(T("settings.xray.hotkey"), 15.5f, false, Theme.Text, X0, y + (rowH - S(22)) / 2, S(200), false, card);
                 var change = new LinkText { Label = T("settings.xray.change"), K = k, BackColor = card };
                 var test = new LinkText { Label = T("settings.xray.test"), K = k, BackColor = card };
+                change.AccName = T("settings.xray.hotkey") + ": " + change.Label;
+                test.AccName = T("settings.xray.hotkey") + ": " + test.Label;
                 var caps = new KeyCaps { K = k, BackColor = card };
                 HotkeySpec spec;
                 if (!recording && HotkeySpec.TryParse(edit.Hotkey, out spec)) caps.Keys = spec.DisplayParts();
@@ -8298,7 +8418,7 @@ settings.done = Done
                 }
                 y += S(12);
                 Label(T("settings.xray.corner"), 15.5f, false, Theme.Text, X0, y + (rowH - S(22)) / 2, S(130), false, card);
-                var picker = Add(new CornerPicker { Value = edit.HotCorner, BackColor = card }, X0 + S(132), y, S(56), rowH);
+                var picker = Add(new CornerPicker { Value = edit.HotCorner, BackColor = card, AccName = T("settings.xray.corner") + ": " + CornerText(edit.HotCorner) }, X0 + S(132), y, S(56), rowH);
                 var desc = Label(CornerText(edit.HotCorner), 15, false, Theme.Sub, X0 + S(132) + S(56) + S(14), y + (rowH - S(22)) / 2, S(220), false, card);
                 picker.Changed += delegate
                 {
@@ -8306,13 +8426,16 @@ settings.done = Done
                     desc.Label = CornerText(edit.HotCorner);
                     desc.Width = GLabel.Measure(desc.Label, desc.F, S(220), false).Width + S(4);
                     desc.Invalidate();
+                    desc.NotifyAccessibleName();
+                    picker.AccName = T("settings.xray.corner") + ": " + desc.Label;
+                    picker.NotifyAccessibleName();
                     SaveNow();
                 };
                 string smText = T("settings.xray.minimized");
                 int smW = GLabel.Measure(smText, Draw.Font(15.5f * k, false), IW - S(70), false).Width;
                 int leftEnd = X0 + S(132) + S(56) + S(14) + GLabel.Measure(desc.Label, desc.F, S(220), false).Width;
                 if (leftEnd + S(24) > X0 + IW - S(54) - S(14) - smW) y += rowH + S(4); // no room: its own line
-                var showMin = new Toggle { On = edit.ShowMinimized, BackColor = card };
+                var showMin = new Toggle { On = edit.ShowMinimized, BackColor = card, AccName = smText };
                 Add(showMin, X0 + IW - S(54), y + (rowH - S(30)) / 2, S(54), S(30));
                 Label(smText, 15.5f, false, Theme.Text, X0 + IW - S(54) - S(14) - smW, y + (rowH - S(22)) / 2, smW + S(4), false, card);
                 showMin.Changed += delegate { edit.ShowMinimized = showMin.On; SaveNow(); };
@@ -8343,7 +8466,7 @@ settings.done = Done
                     chip.AccessibleName = label;
                     chip.AccessibleDescription = T("settings.exclude.remove") + " (Delete)";
                     var e = ex;
-                    chip.Removed += delegate { edit.Exclusions.Remove(e); SaveNow(); Build(); };
+                    chip.Removed += delegate { edit.Exclusions.Remove(e); SaveNow(); RebuildLater(); };
                     place(chip, chip.PreferredWidth());
                 }
                 var pick = new TargetButton { K = k, BackColor = card, Label = T("settings.exclude.pick") };
@@ -8356,18 +8479,19 @@ settings.done = Done
                     var box = new InputBox(Draw.Font(15 * k, false), k);
                     box.Hook();
                     tips.SetToolTip(box.Box, T("settings.exclude.prompt"));
+                    box.Box.AccessibleName = T("settings.exclude.prompt");
                     place(box, S(200));
                     box.Box.KeyDown += delegate(object s2, KeyEventArgs ke)
                     {
                         if (ke.KeyCode == Keys.Enter) { AddApp(box.Box.Text); ke.SuppressKeyPress = true; }
-                        else if (ke.KeyCode == Keys.Escape) { addingApp = false; ke.SuppressKeyPress = true; Build(); }
+                        else if (ke.KeyCode == Keys.Escape) { addingApp = false; ke.SuppressKeyPress = true; RebuildLater(); }
                     };
                     focusAfterBuild = box;
                 }
                 else
                 {
                     var addLink = new LinkText { K = k, BackColor = card, Label = T("settings.exclude.add") };
-                    addLink.Clicked += delegate { addingApp = true; Build(); };
+                    addLink.Clicked += delegate { addingApp = true; RebuildLater(); };
                     place(addLink, addLink.PreferredWidth());
                 }
                 y = Math.Max(leftBottom, cy + chipH);
@@ -8378,11 +8502,11 @@ settings.done = Done
             {
                 Color page = Theme.Page;
                 int rowH = S(40);
-                var start = new Toggle { On = edit.StartWithWindows, BackColor = page };
+                var start = new Toggle { On = edit.StartWithWindows, BackColor = page, AccName = T("settings.start") };
                 Add(start, M + S(2), y + (rowH - S(30)) / 2, S(54), S(30));
                 start.Changed += delegate { edit.StartWithWindows = start.On; SaveNow(); };
                 Label(T("settings.start"), 15.5f, false, Theme.Text, M + S(66), y + (rowH - S(22)) / 2, S(260), false, page);
-                var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = Draw.Font(15 * k, false), BackColor = Theme.Input, ForeColor = Theme.Text };
+                var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = Draw.Font(15 * k, false), BackColor = Theme.Input, ForeColor = Theme.Text, AccessibleName = T("settings.language") };
                 var langs = Texts.Available();
                 var codes = new List<string>();
                 combo.Items.Add(Texts.F("settings.language.auto", "language", AutoLanguageName(langs)));
@@ -8438,7 +8562,7 @@ settings.done = Done
         int ToggleRow(int y, string text, bool value, Action<bool> set)
         {
             int rowH = S(34);
-            var tg = new Toggle { On = value, BackColor = Theme.Card };
+            var tg = new Toggle { On = value, BackColor = Theme.Card, AccName = text };
             Add(tg, X0 + IW - S(54), y + (rowH - S(30)) / 2, S(54), S(30));
             var l = Label(text, 15.5f, false, Theme.Text, X0, y, IW - S(70), true, Theme.Card);
             l.Top = y + Math.Max(0, (rowH - l.Height) / 2);
@@ -8495,7 +8619,16 @@ settings.done = Done
         {
             saveTimer.Stop();
             if (app == null) return;
-            if (!app.SaveSettings(edit)) Build();
+            if (!app.SaveSettings(edit)) RebuildLater();
+        }
+
+        /// <summary>Rebuilds the page after the current message: the control that asked for it is
+        /// usually still inside its own click or key event, and Build disposes every control.</summary>
+        void RebuildLater()
+        {
+            if (IsDisposed) return;
+            if (!IsHandleCreated) { Build(); return; }
+            BeginInvoke(new Action(delegate { if (!IsDisposed) Build(); }));
         }
 
         // ---- exclusions: pick a window or type an app name
@@ -8539,7 +8672,7 @@ settings.done = Done
                 if (!have) edit.Exclusions.Add(Exclusion.Process(name));
                 SaveNow();
             }
-            Build();
+            RebuildLater();
         }
 
         // ---- hotkey: offered list, recording, the three checks
@@ -8656,7 +8789,7 @@ settings.done = Done
             };
             testTimer.Stop();
             testTimer.Start();
-            Build();
+            RebuildLater();   // "Press to test" is a link on the page
         }
 
         void TestTimeout()

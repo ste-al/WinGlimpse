@@ -107,6 +107,7 @@ bool DirExists(const wstr& p);
 void CreateDirs(const wstr& p);
 bool ReadFileBytes(const wstr& p, std::string& out);
 bool WriteFileBytes(const wstr& p, const std::string& data);
+bool WriteFileAtomic(const wstr& p, const std::string& data);   // old or new content, never half
 bool AppendFileBytes(const wstr& p, const std::string& data);
 bool FileStamp(const wstr& p, unsigned long long& writeTime, unsigned long long& size);
 wstr LocalAppData();

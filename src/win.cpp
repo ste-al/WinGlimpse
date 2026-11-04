@@ -100,6 +100,13 @@ bool KeyDown(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 void ForceForeground(HWND hwnd) {
     if (!hwnd) return;
     if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
+    // Windows lets the process that received the last input event take the foreground. When the input
+    // that opened us has already gone elsewhere (the hotkey's key-up events), an input event of our own
+    // makes us that process: an empty mouse event, no movement, no button.
+    INPUT input = {};
+    input.type = INPUT_MOUSE;
+    SendInput(1, &input, sizeof input);
+    if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
     HWND fg = GetForegroundWindow();
     DWORD pid;
     DWORD fgThread = fg ? GetWindowThreadProcessId(fg, &pid) : 0;
@@ -866,7 +873,7 @@ bool SizeMemory::TryGet(const TrackedWindow& w, int& width, int& height) {
 void SizeMemory::SaveIfDirty() {
     if (!dirty || !loaded) return;
     Util::CreateDirs(Util::DirName(Path()));
-    if (Util::WriteFileBytes(Path(), ini.ToBytes())) dirty = false;
+    if (Util::WriteFileAtomic(Path(), ini.ToBytes())) dirty = false;
     else Log::Warn(L"cannot write " + Path());
 }
 

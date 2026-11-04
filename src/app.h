@@ -345,6 +345,8 @@ int Show(HWND owner, const std::vector<MenuItem>& items, int x, int y, float k, 
          std::function<SIZE(float)> headerSize = nullptr, std::function<void(Graphics&, const RectF&, float)> headerPaint = nullptr);
 // every window that owns a popup menu passes WM_MEASUREITEM and WM_DRAWITEM here first
 bool OwnerDraw(UINT m, WPARAM wp, LPARAM lp, LRESULT& result);
+// true while a menu is open (its owner must stay alive until it closes)
+bool IsOpen();
 // the same menu as a picture (preview images)
 Gdiplus::Bitmap* Render(const std::vector<MenuItem>& items, float k, std::function<SIZE(float)> headerSize,
                         std::function<void(Graphics&, const RectF&, float)> headerPaint, int selected);
@@ -525,7 +527,7 @@ private:
     UINT taskbarCreated = 0;
     HICON hIcon = nullptr;
     wstr iconKey, tip;
-    bool added = false;
+    bool added = false, addFailed = false;
 };
 
 namespace Toast {
@@ -612,6 +614,7 @@ private:
     void OnSafetyTick();
     void ApplyFirstClick();
     HWND GlimpseOwnerAt(int x, int y);
+    void FinishExit();
     void Shutdown();
 
     LayoutMemory layouts;
@@ -625,7 +628,7 @@ private:
     std::vector<long long> recentMoves;
     std::vector<UndoItem> toVerify;
     long long suspendedUntil = 0;
-    bool disposed = false;
+    bool disposed = false, exiting = false;
     bool trace = false;
 };
 

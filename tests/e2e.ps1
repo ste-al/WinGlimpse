@@ -5,11 +5,15 @@
 .DESCRIPTION
     Starts Glimpse with a test Glimpse.ini, opens test windows and checks what Glimpse does:
       1. a new window opened exactly on top of another moves so both keep a glimpse;
-      2. dragging a window over another one nudges the covered window on drop;
+      2. a window dropped so it covers all of another one but a 30 px strip nudges the covered
+         window by the smallest move that gives it back a glimpse;
       3. the toast's Undo restores the nudged window's exact rectangle;
       4. Ctrl+Alt+Space opens X-ray, Esc closes it;
-      5. a second start with /settings opens the settings window;
+      5. a second start with /settings opens the settings window, and its controls have names and
+         roles for screen readers (UI Automation);
       6. /exit closes Glimpse, and the log has no errors.
+    The test windows come from a small WinForms program compiled on the fly (no console windows), and
+    every other window is minimized first, so only the test windows count.
     Screenshots and the log are written to -Out. The exit code is the number of failed checks.
 
 .PARAMETER Exe
@@ -61,9 +65,10 @@ public static class E2E
 [void][E2E]::SetProcessDPIAware()
 
 $failed = 0
+$results = New-Object 'System.Collections.Generic.List[string]'
 function Check([bool]$ok, [string]$name, [string]$detail) {
-    if ($ok) { Write-Host "ok - $name" }
-    else { Write-Host "not ok - $name $detail"; $script:failed++ }
+    if ($ok) { Write-Host "ok - $name"; $script:results.Add("| :white_check_mark: | $name | |") }
+    else { Write-Host "not ok - $name $detail"; $script:failed++; $script:results.Add("| :x: | $name | $($detail -replace '\|', '/' -replace '[\r\n]+', ' ') |") }
 }
 
 function Shot([string]$name) {
@@ -96,14 +101,32 @@ function HasGlimpse($w, $others) {
     return $false
 }
 
+# The test windows: a WinForms program without a console (a console helper would add windows of its
+# own, and with Windows Terminal as the default terminal it cannot even be hidden).
+$testExe = Join-Path $Out 'GlimpseTestWindow.exe'
+if (Test-Path -LiteralPath $testExe) { Remove-Item -LiteralPath $testExe -Force }
+Add-Type -OutputAssembly $testExe -OutputType WindowsApplication -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+public static class GlimpseTestWindow
+{
+    [STAThread]
+    public static void Main(string[] a)
+    {
+        var f = new Form();
+        f.Text = a[0];
+        f.StartPosition = FormStartPosition.Manual;
+        f.Location = new Point(int.Parse(a[1]), int.Parse(a[2]));
+        f.Size = new Size(int.Parse(a[3]), int.Parse(a[4]));
+        Application.Run(f);
+    }
+}
+'@
+
 $testProcesses = @()
 function Start-TestWindow([string]$title, [int]$x, [int]$y, [int]$w, [int]$h) {
-    $code = "Add-Type -AssemblyName System.Windows.Forms; " +
-        "`$f = New-Object System.Windows.Forms.Form; `$f.Text = '$title'; `$f.StartPosition = 'Manual'; " +
-        "`$f.Location = New-Object System.Drawing.Point($x, $y); `$f.Size = New-Object System.Drawing.Size($w, $h); " +
-        "[System.Windows.Forms.Application]::Run(`$f)"
-    # the console of the helper process hides itself, so only the test form counts as a window
-    $p = Start-Process powershell.exe -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', $code -PassThru
+    $p = Start-Process -FilePath $testExe -ArgumentList "`"$title`"", $x, $y, $w, $h -PassThru
     $script:testProcesses += $p
     for ($i = 0; $i -lt 150; $i++) {
         Start-Sleep -Milliseconds 100
@@ -113,12 +136,20 @@ function Start-TestWindow([string]$title, [int]$x, [int]$y, [int]$w, [int]$h) {
     throw "test window '$title' did not appear"
 }
 
+function Click([int]$x, [int]$y) {
+    [void][E2E]::SetCursorPos($x, $y)
+    Start-Sleep -Milliseconds 150
+    [E2E]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)   # left down
+    Start-Sleep -Milliseconds 60
+    [E2E]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)   # left up
+}
+
 function Drag([int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
     [void][E2E]::SetCursorPos($fromX, $fromY)
     Start-Sleep -Milliseconds 200
     [E2E]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)   # left down
-    Start-Sleep -Milliseconds 200
-    $steps = 20
+    Start-Sleep -Milliseconds 250
+    $steps = 25
     for ($i = 1; $i -le $steps; $i++) {
         [void][E2E]::SetCursorPos([int]($fromX + ($toX - $fromX) * $i / $steps), [int]($fromY + ($toY - $fromY) * $i / $steps))
         Start-Sleep -Milliseconds 40
@@ -135,13 +166,17 @@ function Keys([byte[]]$down) {
 }
 
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen
-Write-Host "screen $($screen.Bounds) work area $($screen.WorkingArea)"
+$work = $screen.WorkingArea
+Write-Host "screen $($screen.Bounds) work area $work"
 
-# a test Glimpse.ini: no Start with Windows, no hot corner, debug log
+# a clean desktop: only the test windows count
+try { (New-Object -ComObject Shell.Application).MinimizeAll(); Start-Sleep -Seconds 1 } catch { Write-Host "MinimizeAll is not available: $_" }
+
+# a test Glimpse.ini: no Start with Windows, no hot corner, English texts, debug log
 $ini = Join-Path $Out 'Glimpse.ini'
 $defaults = Join-Path (Split-Path -Parent $Exe) 'Glimpse.ini'
 $text = if (Test-Path $defaults) { Get-Content -Raw -LiteralPath $defaults } else { "[Glimpse]`r`n" }
-$text = $text -replace 'StartWithWindows=1', 'StartWithWindows=0' -replace 'HotCorner=TopLeft', 'HotCorner=Off' -replace 'LogLevel=Info', 'LogLevel=Debug'
+$text = $text -replace 'StartWithWindows=1', 'StartWithWindows=0' -replace 'HotCorner=TopLeft', 'HotCorner=Off' -replace 'Language=auto', 'Language=en' -replace 'LogLevel=Info', 'LogLevel=Debug'
 [System.IO.File]::WriteAllText($ini, $text)
 $log = Join-Path $env:LOCALAPPDATA 'Glimpse\Glimpse.log'
 if (Test-Path $log) { Remove-Item -LiteralPath $log -Force }
@@ -162,20 +197,27 @@ try {
     Check (HasGlimpse $ra @($rb)) 'the older window keeps a glimpse' "A $(Fmt $ra) B $(Fmt $rb)"
     Check (HasGlimpse $rb @($ra)) 'the new window has a glimpse' "A $(Fmt $ra) B $(Fmt $rb)"
 
-    # ---- 2. dragging B over C nudges C on drop
-    $c = Start-TestWindow 'Glimpse E2E C' 620 380 380 320
+    # ---- 2. drop B over C so that only a 30 px strip of C stays free: C moves 20 px down
+    $c = Start-TestWindow 'Glimpse E2E C' 600 300 380 320
     Start-Sleep -Seconds 1
-    $rb = Rect $b; $rc = Rect $c
-    [void][E2E]::SetForegroundWindow($b)
-    Start-Sleep -Milliseconds 300
+    $rb = Rect $b; $rc = Rect $c; $ra = Rect $a
+    Write-Host "before the drag: A $(Fmt $ra) B $(Fmt $rb) C $(Fmt $rc)"
+    $bw = $rb.R - $rb.L; $bh = $rb.B - $rb.T
+    $targetL = $rc.L - 40
+    $targetT = $rc.B - 30 - $bh
+    if ($rc.B + 60 -gt $work.Bottom -or $bw -lt ($rc.R - $rc.L) + 80) { Write-Host "warning: the layout leaves no room for the expected nudge" }
+    # activate B with a click on its title bar, then drag it by the title bar
     $grabX = $rb.L + 150; $grabY = $rb.T + 12
-    Drag $grabX $grabY ($grabX + (600 - $rb.L)) ($grabY + (350 - $rb.T))
+    Click $grabX $grabY
+    Start-Sleep -Milliseconds 400
+    Drag $grabX $grabY ($grabX + $targetL - $rb.L) ($grabY + $targetT - $rb.T)
     Start-Sleep -Seconds 2
     Shot '3-after-drop'
     $rb2 = Rect $b; $rc2 = Rect $c
-    Write-Host "dragged B to $(Fmt $rb2); C $(Fmt $rc) -> $(Fmt $rc2)"
-    Check ((Fmt $rb2) -ne (Fmt $rb)) 'the drag moved the window' "B $(Fmt $rb) -> $(Fmt $rb2)"
+    Write-Host "dragged B to $(Fmt $rb2) (target $targetL,$targetT); C $(Fmt $rc) -> $(Fmt $rc2)"
+    Check ($rb2.L -eq $targetL -and $rb2.T -eq $targetT) 'the drag moved the window to the target' "B $(Fmt $rb) -> $(Fmt $rb2), target $targetL,$targetT"
     Check ((Fmt $rc2) -ne (Fmt $rc)) 'the covered window is nudged on drop' "C stayed at $(Fmt $rc2)"
+    Check ($rc2.T - $rc.T -eq 20 -and $rc2.L -eq $rc.L) 'the nudge is the smallest move: 20 px down' "C $(Fmt $rc) -> $(Fmt $rc2)"
     Check (HasGlimpse $rc2 @($rb2, (Rect $a))) 'the nudged window has a glimpse' "C $(Fmt $rc2) B $(Fmt $rb2)"
 
     # ---- 3. the toast's Undo restores the exact previous rectangle
@@ -184,10 +226,7 @@ try {
     if ($toast -ne [IntPtr]::Zero) {
         $rt = [E2E]::Frame($toast)
         # the Undo button sits at the right end of the toast
-        [void][E2E]::SetCursorPos($rt.R - 45, [int](($rt.T + $rt.B) / 2))
-        Start-Sleep -Milliseconds 200
-        [E2E]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)
-        [E2E]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
+        Click ($rt.R - 45) ([int](($rt.T + $rt.B) / 2))
         Start-Sleep -Seconds 1
         $rc3 = Rect $c
         Shot '3b-after-undo'
@@ -203,7 +242,7 @@ try {
     Keys @(0x1B)
     Start-Sleep -Seconds 1
     $xray = [E2E]::FindTitle('Glimpse X-ray')
-    Check ($xray -eq [IntPtr]::Zero) 'Esc closes X-ray' ''
+    Check ($xray -eq [IntPtr]::Zero -or -not [E2E]::IsWindowVisible($xray)) 'Esc closes X-ray' ''
 
     # ---- 5. a second start with /settings opens the settings window
     Start-Process -FilePath $Exe -ArgumentList '/settings' | Out-Null
@@ -212,7 +251,25 @@ try {
     Start-Sleep -Seconds 1
     Shot '5-settings'
     Check ($settings -ne [IntPtr]::Zero) 'a second start with /settings opens Settings' ''
-    if ($settings -ne [IntPtr]::Zero) { [void][E2E]::PostMessage($settings, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
+    if ($settings -ne [IntPtr]::Zero) {
+        # the custom-drawn controls tell screen readers what they are
+        try {
+            Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+            $ua = [System.Windows.Automation.AutomationElement]
+            $types = [System.Windows.Automation.ControlType]
+            $all = @($ua::FromHandle($settings).FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
+            $seen = @($all | ForEach-Object { $_.Current.ControlType.ProgrammaticName.Replace('ControlType.', '') + ' ' + $_.Current.Name } | Where-Object { $_ -notmatch ' $' })
+            $start = @($all | Where-Object { $_.Current.ControlType -eq $types::CheckBox -and $_.Current.Name -eq 'Start with Windows' })
+            $modes = @($all | Where-Object { $_.Current.ControlType -eq $types::RadioButton -and $_.Current.Name -match '^(Guide|Assist|Strict)' })
+            $detail = ($seen | Select-Object -First 12) -join '; '
+            Check ($start.Count -eq 1) 'Settings: the Start with Windows toggle is a named check box' $detail
+            Check ($modes.Count -eq 3) 'Settings: the three mode cards are named radio buttons' $detail
+            Write-Host ("UI Automation: " + $all.Count + " elements; " + (($seen | Select-Object -First 40) -join '; '))
+        } catch {
+            Check $false 'Settings: UI Automation' $_.Exception.Message
+        }
+        [void][E2E]::PostMessage($settings, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+    }
     Start-Sleep -Seconds 1
 }
 catch {
@@ -237,4 +294,9 @@ if (Test-Path $log) {
 }
 
 Write-Host ("e2e: " + $failed + " failed")
+# on GitHub Actions: a table on the run page, so a failure is visible without opening the step log
+if ($env:GITHUB_STEP_SUMMARY) {
+    $lines = @("### End-to-end test: $([System.IO.Path]::GetFileName((Split-Path -Parent $Exe)))\$([System.IO.Path]::GetFileName($Exe))", '', '| | Check | Detail |', '|---|---|---|') + $results + @('', "$failed failed", '')
+    try { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $lines -Encoding UTF8 } catch { }
+}
 exit $failed

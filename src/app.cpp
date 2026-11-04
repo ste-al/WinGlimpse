@@ -865,14 +865,23 @@ HWND GlimpseApp::GlimpseOwnerAt(int x, int y) {
 }
 
 void GlimpseApp::ExitApp() {
-    if (disposed) return;
+    if (disposed || exiting) return;
+    exiting = true;
     Log::Info(L"exit");
     // the exit command arrives inside the message window, which Shutdown destroys: shut down a moment
     // later, still inside the message loop (destroying windows after it ended is slow on some systems)
-    Ui::Post([this]() {
-        Shutdown();
-        Ui::Quit(0);
-    });
+    Ui::Post([this]() { FinishExit(); });
+}
+
+// a menu that is open keeps running its own message loop: close it first, its owner must outlive it
+void GlimpseApp::FinishExit() {
+    if (PopupMenu::IsOpen()) {
+        EndMenu();
+        Ui::Later(50, [this]() { FinishExit(); });
+        return;
+    }
+    Shutdown();
+    Ui::Quit(0);
 }
 
 void GlimpseApp::Shutdown() {

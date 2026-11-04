@@ -7,10 +7,12 @@
     It is the same program as Glimpse.exe: same source, same behaviour, same Glimpse.ini.
     Use it where EXE files are blocked but PowerShell runs in Full Language mode.
 
-    Start it hidden, as the logon script or Start with Windows does:
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File Glimpse.ps1
-    With a settings file elsewhere (environment variables are expanded):
-        powershell.exe -NoProfile -WindowStyle Hidden -File Glimpse.ps1 -Ini "%APPDATA%\Glimpse\Glimpse.ini"
+    Start it in the background, as the logon script or Start with Windows does:
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File Glimpse.ps1 -Background
+    With -Background it starts a second powershell.exe without any console window and exits, so no
+    window stays open, also where Windows Terminal is the default terminal (-WindowStyle Hidden alone
+    cannot hide a Windows Terminal window). With a settings file elsewhere (variables are expanded):
+        powershell.exe -NoProfile -WindowStyle Hidden -File Glimpse.ps1 -Background -Ini "%APPDATA%\Glimpse\Glimpse.ini"
 
 .PARAMETER Ini
     Settings file to use instead of Glimpse.ini next to this script. Created if missing.
@@ -22,7 +24,11 @@
     Ask the Glimpse that runs in this session to exit.
 
 .PARAMETER Background
-    Started at logon: when Glimpse already runs in this session, exit quietly.
+    Started at logon: when Glimpse already runs in this session, exit quietly; otherwise run Glimpse
+    in a powershell.exe without a console window.
+
+.PARAMETER Detached
+    Used by -Background for the process it starts; not needed otherwise.
 
 .PARAMETER SelfTest
     Run the self-test: unit tests and the shared geometry cases (tests\geometry-cases.txt or -Cases).
@@ -42,6 +48,7 @@ param(
     [switch]$Settings,
     [switch]$Exit,
     [switch]$Background,
+    [switch]$Detached,
     [switch]$SelfTest,
     [string]$Cases,
     [switch]$CheckLang,
@@ -104,6 +111,25 @@ if ($Background -and -not $Settings -and -not $Exit) {
     if ([System.Threading.Mutex]::TryOpenExisting('Local\Glimpse.SingleInstance', [ref]$existing)) {
         $existing.Dispose()
         exit 0
+    }
+}
+
+# In the background: hand over to a powershell.exe without a console window and exit. A process started
+# with CreateNoWindow has no window in any terminal; -WindowStyle Hidden cannot hide a Windows Terminal tab.
+if ($Background -and -not $Detached -and -not $Settings -and -not $Exit) {
+    function Quote([string]$s) { return '"' + ($s -replace '(\\+)$', '$1$1') + '"' }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ' + (Quote $scriptPath) + ' -Background -Detached'
+    if ($Ini) { $psi.Arguments += ' -Ini ' + (Quote $Ini) }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.WorkingDirectory = $here
+    try {
+        [void][System.Diagnostics.Process]::Start($psi)
+        exit 0
+    } catch {
+        Write-GlimpseLog ("could not start Glimpse without a console window, running here: " + $_.Exception.Message)
     }
 }
 

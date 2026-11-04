@@ -9,7 +9,7 @@ Start
 -----
   Glimpse.exe                        EXE build (win-x64, win-arm64, native-win-x64 or
                                      native-win-arm64 package)
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File Glimpse.ps1
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File Glimpse.ps1 -Background
                                      PowerShell build (Glimpse.cs must sit next to it)
 
 Glimpse lives in the notification area: left-click the icon for X-ray, right-click for the menu

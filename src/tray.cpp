@@ -46,7 +46,13 @@ void TrayUi::Add() {
     if (added) {
         nid.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIconW(NIM_SETVERSION, &nid);
-    } else Log::Warn(L"tray icon could not be added (no notification area yet)");
+        if (addFailed) Log::Info(L"tray icon added");
+        addFailed = false;
+    } else if (!addFailed) {
+        // started before the taskbar (a logon script): TaskbarCreated or the next status update retries
+        Log::Warn(L"tray icon could not be added (no notification area yet), will retry");
+        addFailed = true;
+    }
 }
 
 void TrayUi::Rebuild() { Update(); }
@@ -77,6 +83,7 @@ std::vector<wstr> TrayUi::Notes() const {
 }
 
 void TrayUi::Update() {
+    if (!added && addFailed) Add();
     Color dot;
     wstr status = StatusText(dot);
     bool warn = app->Suspended() || app->store.usingDefaults || !app->S().problems.empty() || (app->hotkeys && !app->hotkeys->problem.empty());

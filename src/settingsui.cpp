@@ -5,6 +5,7 @@
 #include "app.h"
 #include "resource.h"
 #include <climits>
+#include <oleacc.h>
 
 namespace glimpse {
 
@@ -17,6 +18,88 @@ const wchar_t* kCtlClass = L"GlimpseSettingsControl";
 const int kWidth100 = 740;
 
 struct Page;
+struct Ctl;
+
+// ------------------------------------------------------------------ accessibility
+// The controls are custom windows: their window text is the name a screen reader announces. Dynamic annotation
+// (oleacc) adds the role and the live state (checked, focused, unavailable) through a small property server.
+// Without oleacc (or in Wine) the controls still have their names.
+
+namespace Acc {
+
+const GUID kIidUnknown = { 0x00000000, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
+const GUID kClsidServices = { 0xb5f8350b, 0x0548, 0x48b1, { 0xa6, 0xee, 0x88, 0xbd, 0x00, 0xb4, 0xa5, 0xe7 } };
+const GUID kIidServices = { 0x6e26e776, 0x04f0, 0x495d, { 0x80, 0xe4, 0x33, 0x30, 0x35, 0x2e, 0x31, 0x69 } };
+const GUID kIidServer = { 0x76c0dbbb, 0x15e0, 0x4e7b, { 0xb6, 0x1b, 0x20, 0xee, 0xea, 0x20, 0x01, 0xe0 } };
+const GUID kPropName = { 0x608d3df8, 0x8128, 0x4aa7, { 0xa4, 0x28, 0xf5, 0x5e, 0x49, 0x26, 0x72, 0x91 } };
+const GUID kPropRole = { 0xcb905ff2, 0x7bd1, 0x4c05, { 0xb3, 0xc8, 0xe6, 0xc2, 0x41, 0x36, 0x4d, 0x70 } };
+const GUID kPropState = { 0xa8d4d5b0, 0x0a21, 0x42d0, { 0xa5, 0xc0, 0x51, 0x4e, 0x98, 0x4f, 0x45, 0x7b } };
+
+IAccPropServices* services = nullptr;
+bool tried = false;
+
+IAccPropServices* Services() {
+    if (!tried) {
+        tried = true;
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // S_FALSE or RPC_E_CHANGED_MODE: already set up
+        (void)hr;
+        if (FAILED(CoCreateInstance(kClsidServices, nullptr, CLSCTX_INPROC_SERVER, kIidServices, (void**)&services))) services = nullptr;
+    }
+    return services;
+}
+
+long RoleOf(HWND h, long& state);   // defined after the controls
+
+// answers role and state for the control windows; lives as long as the process (no reference counting)
+struct Server : IAccPropServer {
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (!out) return E_POINTER;
+        if (IsEqualIID(riid, kIidUnknown) || IsEqualIID(riid, kIidServer)) { *out = this; return S_OK; }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 2; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE GetPropValue(const BYTE* id, DWORD len, MSAAPROPID prop, VARIANT* v, BOOL* has) override {
+        if (!v || !has) return E_POINTER;
+        *has = FALSE;
+        v->vt = VT_EMPTY;
+        HWND h = nullptr;
+        DWORD obj = 0, child = 0;
+        if (!services || FAILED(services->DecomposeHwndIdentityString(id, len, &h, &obj, &child)) || child != CHILDID_SELF) return S_OK;
+        long state = 0;
+        long role = RoleOf(h, state);
+        if (!role) return S_OK;
+        if (IsEqualGUID(prop, kPropRole)) { v->vt = VT_I4; v->lVal = role; *has = TRUE; }
+        else if (IsEqualGUID(prop, kPropState)) { v->vt = VT_I4; v->lVal = state; *has = TRUE; }
+        return S_OK;
+    }
+};
+Server server;
+
+void Annotate(HWND h) {
+    if (!h || !Services()) return;
+    MSAAPROPID props[2] = { kPropRole, kPropState };
+    services->SetHwndPropServer(h, (DWORD)OBJID_CLIENT, CHILDID_SELF, props, 2, &server, ANNO_THIS);
+}
+
+// a fixed name for a window that has no text of its own (the EDIT inside a text box)
+void Name(HWND h, const wstr& name) {
+    if (!h || !Services()) return;
+    services->SetHwndPropStr(h, (DWORD)OBJID_CLIENT, CHILDID_SELF, kPropName, name.c_str());
+}
+
+void Clear(HWND h) {
+    if (!h || !services) return;
+    MSAAPROPID props[3] = { kPropRole, kPropState, kPropName };
+    services->ClearHwndProps(h, (DWORD)OBJID_CLIENT, CHILDID_SELF, props, 3);
+}
+
+void StateChanged(HWND h) {
+    if (h) NotifyWinEvent(EVENT_OBJECT_STATECHANGE, h, OBJID_CLIENT, CHILDID_SELF);
+}
+
+}  // namespace Acc
 
 // ------------------------------------------------------------------ control base
 
@@ -28,8 +111,24 @@ struct Ctl {
     int x = 0, y = 0, w = 0, h = 0;      // page coordinates (not scrolled)
     bool hot = false, tracking = false, pressed = false;
     bool tabStop = false, hand = false;
+    bool container = false;              // holds a focusable child (tab moves into it)
     wstr tip;
+    wstr name;                           // for screen readers: the window text is the accessible name
     virtual ~Ctl() {}
+    virtual wstr AccessibleName() const { return name; }
+    virtual long AccessibleRole() const { return 0; }       // 0: a plain client area
+    virtual long AccessibleChecked() const { return 0; }
+    long AccessibleState() const {
+        long s = AccessibleChecked();
+        if (!hwnd || !IsWindowVisible(hwnd)) s |= STATE_SYSTEM_INVISIBLE;
+        if (!Enabled()) s |= STATE_SYSTEM_UNAVAILABLE;
+        else if (tabStop) s |= STATE_SYSTEM_FOCUSABLE;
+        if (Focused()) s |= STATE_SYSTEM_FOCUSED;
+        if (hot) s |= STATE_SYSTEM_HOTTRACKED;
+        if (!tabStop) s |= STATE_SYSTEM_READONLY;
+        return s;
+    }
+    void UpdateName() { if (hwnd) SetWindowTextW(hwnd, AccessibleName().c_str()); }
     virtual void Paint(Graphics& g) {}
     virtual void PaintGdi(HDC dc, bool snapshot) {}
     virtual void OnClick() {}
@@ -59,6 +158,8 @@ struct Label : Ctl {
     HFONT font = nullptr;
     Color ink;
     bool wrap = false;
+    wstr AccessibleName() const override { return text; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_STATICTEXT; }
     void Paint(Graphics& g) override { Fill(g); }
     void PaintGdi(HDC dc, bool) override {
         RECT r = { 0, 0, w, h };
@@ -71,11 +172,14 @@ struct Toggle : Ctl {
     bool on = false;
     std::function<void()> changed;
     Toggle() { tabStop = true; hand = true; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_CHECKBUTTON; }
+    long AccessibleChecked() const override { return on ? STATE_SYSTEM_CHECKED : 0; }
     void OnClick() override {
         if (!Enabled()) return;
         on = !on;
         SetFocus(hwnd);
         Invalidate();
+        Acc::StateChanged(hwnd);
         if (changed) changed();
     }
     bool OnKey(UINT vk) override { if (vk == VK_SPACE) { OnClick(); return true; } return false; }
@@ -96,6 +200,7 @@ struct Segmented : Ctl {
     int selected = 0;
     std::function<void()> changed;
     Segmented() { tabStop = true; hand = true; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_SLIDER; }
     int PreferredWidth() const {
         float ww = 0;
         for (const wstr& s : items) ww += Draw::Measure(s, Draw::Font(15 * K, true)).Width + 44 * K;
@@ -152,7 +257,11 @@ struct Segmented : Ctl {
         if (i == selected) return;
         selected = i;
         Invalidate();
+        UpdateName();
         if (changed) changed();
+    }
+    wstr AccessibleName() const override {
+        return selected >= 0 && selected < (int)items.size() ? name + L": " + items[selected] : name;
     }
 };
 
@@ -168,11 +277,14 @@ struct ModeCard : Ctl {
     bool checked = false;
     std::function<void()> picked;
     ModeCard() { tabStop = true; hand = true; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_RADIOBUTTON; }
+    long AccessibleChecked() const override { return checked ? STATE_SYSTEM_CHECKED : 0; }
     static int HeightFor(const wstr& title, const wstr& badge, const wstr& desc, int width, float k) {
         int top = (int)(46 * k) + (BadgeBelow(title, badge, width, k) ? (int)(28 * k) : 0);
         return top + Draw::MeasureGdi(desc, Draw::GdiFont(14 * k, false), width - (int)(36 * k), true).cy + (int)(16 * k);
     }
     int Top() const { return (int)(46 * K) + (BadgeBelow(title, badge, w, K) ? (int)(28 * K) : 0); }
+    wstr AccessibleName() const override { return title + (badge.empty() ? wstr() : L", " + badge) + L". " + desc; }
     void Paint(Graphics& g) override {
         Fill(g);
         RectF r(1.5f * K, 1.5f * K, w - 3 * K, h - 3 * K);
@@ -221,6 +333,8 @@ struct LinkText : Ctl {
     std::function<void()> clicked;
     LinkText() { tabStop = true; hand = true; }
     int PreferredWidth() const { return (int)Draw::Measure(label, Draw::Font(15 * K, bold)).Width + (int)(6 * K); }
+    wstr AccessibleName() const override { return name.empty() ? label : name; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_LINK; }
     void Paint(Graphics& g) override {
         Fill(g);
         Gdiplus::Font* f = Draw::Font(15 * K, bold);
@@ -240,6 +354,12 @@ struct LinkText : Ctl {
 
 struct KeyCaps : Ctl {
     std::vector<wstr> keys;
+    wstr AccessibleName() const override {
+        wstr s;
+        for (const wstr& k : keys) { if (!s.empty()) s += L"+"; s += k; }
+        return s.empty() ? Texts::T(L"settings.xray.none") : s;
+    }
+    long AccessibleRole() const override { return ROLE_SYSTEM_STATICTEXT; }
     int PreferredWidth() const {
         if (keys.empty()) return (int)Draw::Measure(Texts::T(L"settings.xray.none"), Draw::Font(15 * K, false)).Width + 4;
         float ww = 0;
@@ -277,6 +397,7 @@ struct CornerPicker : Ctl {
     Corner value = Corner::TopLeft;
     std::function<void()> changed;
     CornerPicker() { tabStop = true; hand = true; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_SPINBUTTON; }
     RectF Box() const { return RectF(1, 1, (REAL)w - 3, (REAL)h - 3); }
     void Paint(Graphics& g) override {
         Fill(g);
@@ -321,6 +442,8 @@ struct Chip : Ctl {
     std::function<void()> removed;
     Chip() { tabStop = true; }
     int PreferredWidth() const { return (int)(12 * K + 22 * K + 8 * K + Draw::Measure(label, Draw::Font(15 * K, false)).Width + 10 * K + 18 * K + 10 * K); }
+    wstr AccessibleName() const override { return label + L" (" + Texts::T(L"settings.exclude.remove") + L": Delete)"; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_LISTITEM; }
     void Paint(Graphics& g) override {
         Fill(g);
         RectF r(1, 1, (REAL)w - 3, (REAL)h - 3);
@@ -347,6 +470,8 @@ struct TargetButton : Ctl {
     std::function<void(POINT)> hovering, pickedAt;
     TargetButton() { tabStop = true; hand = true; }
     int PreferredWidth() const { return (int)(16 * K + 22 * K + 10 * K + Draw::Measure(label, Draw::Font(15 * K, true)).Width + 18 * K); }
+    wstr AccessibleName() const override { return label; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_PUSHBUTTON; }
     void Paint(Graphics& g) override {
         Fill(g);
         RectF r(1, 1, (REAL)w - 3, (REAL)h - 3);
@@ -378,6 +503,8 @@ struct PrimaryButton : Ctl {
     wstr label;
     std::function<void()> clicked;
     PrimaryButton() { tabStop = true; hand = true; }
+    wstr AccessibleName() const override { return label; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_PUSHBUTTON; }
     void Paint(Graphics& g) override {
         Fill(g);
         RectF r(1, 1, (REAL)w - 3, (REAL)h - 3);
@@ -400,7 +527,9 @@ struct InputBox : Ctl {
     HBRUSH brush = nullptr;
     std::function<void()> textChanged;
     std::function<bool(UINT)> key;      // Enter, Escape
+    InputBox() { container = true; }
     ~InputBox() override { if (brush) DeleteObject(brush); }
+    void OnMouseDown(int, int) override { if (edit && IsWindowEnabled(edit)) SetFocus(edit); }
     wstr Text() const { return edit ? Native::WindowText(edit) : wstr(); }
     void SetInvalid(bool v) { if (invalid != v) { invalid = v; Invalidate(); } }
     void Paint(Graphics& g) override {
@@ -472,6 +601,10 @@ struct DropButton : Ctl {
     int selected = 0;
     std::function<void(int)> picked;
     DropButton() { tabStop = true; hand = true; }
+    long AccessibleRole() const override { return ROLE_SYSTEM_BUTTONMENU; }
+    wstr AccessibleName() const override {
+        return selected >= 0 && selected < (int)items.size() ? name + L": " + items[selected] : name;
+    }
     void Paint(Graphics& g) override {
         Fill(g);
         RectF r(0.5f, 0.5f, (REAL)w - 1.5f, (REAL)h - 1.5f);
@@ -535,8 +668,9 @@ struct Page {
         c->page = this;
         if (c->back.GetValue() == 0) c->back = Theme::Card();
         controls.push_back(std::unique_ptr<Ctl>(c));
-        c->hwnd = CreateWindowExW(0, kCtlClass, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | (c->tabStop ? WS_TABSTOP : 0),
+        c->hwnd = CreateWindowExW(c->container ? WS_EX_CONTROLPARENT : 0, kCtlClass, c->AccessibleName().c_str(), WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | (c->tabStop ? WS_TABSTOP : 0),
                                   x, y - scrollY, w, h, hwnd, nullptr, Ui::Instance(), c);
+        if (c->AccessibleRole()) Acc::Annotate(c->hwnd);
         return c;
     }
 
@@ -582,7 +716,8 @@ struct Page {
             if (box->key((UINT)wp)) return 0;
         }
         if (m == WM_CHAR && (wp == L'\r' || wp == 27) && box->key) return 0;
-        if (m == WM_NCDESTROY) RemoveWindowSubclass(h, EditProc, 1);
+        if (m == WM_SETFOCUS && box->page) box->page->EnsureVisible(box);
+        if (m == WM_NCDESTROY) { Acc::Clear(h); RemoveWindowSubclass(h, EditProc, 1); }
         return DefSubclassProc(h, m, wp, lp);
     }
 
@@ -618,6 +753,14 @@ struct Page {
     int ToggleRow(int y, const wstr& text, bool value, std::function<void(bool)> set);
     void ApplySize();
     void ScrollTo(int pos);
+
+    // keyboard focus moved to c: scroll it into view, as WinForms does for a scrolling panel
+    void EnsureVisible(const Ctl* c) {
+        if (building || !c) return;
+        int margin = S(12);
+        if (c->y - scrollY < 0) ScrollTo(c->y - margin);
+        else if (c->y + c->h - scrollY > clientH) ScrollTo(c->y + c->h - clientH + margin);
+    }
 
     wstr CornerText(Corner c) const {
         if (c == Corner::Off) return T(L"settings.xray.cornerOff");
@@ -878,14 +1021,25 @@ void DropButton::OnClick() {
     if (chosen >= 1 && chosen - 1 != selected) {
         selected = chosen - 1;
         Invalidate();
+        UpdateName();
         if (picked) picked(selected);
     }
 }
 
 // ------------------------------------------------------------------ control window procedure
 
+long Acc::RoleOf(HWND h, long& state) {
+    wchar_t cls[64] = {};
+    if (!h || !GetClassNameW(h, cls, 64) || wcscmp(cls, kCtlClass) != 0) return 0;
+    auto* c = (const Ctl*)GetWindowLongPtrW(h, GWLP_USERDATA);
+    if (!c) return 0;
+    state = c->AccessibleState();
+    return c->AccessibleRole();
+}
+
 LRESULT CALLBACK CtlProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
     if (m == WM_NCCREATE) SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);
+    if (m == WM_NCDESTROY) Acc::Clear(h);
     auto* c = (Ctl*)GetWindowLongPtrW(h, GWLP_USERDATA);
     if (!c) return DefWindowProcW(h, m, wp, lp);
     bool handled = false;
@@ -959,6 +1113,9 @@ LRESULT CALLBACK CtlProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             }
             break;
         case WM_SETFOCUS:
+            if (c->page) c->page->EnsureVisible(c);
+            c->Invalidate();
+            break;
         case WM_KILLFOCUS:
         case WM_ENABLE:
         case WM_UPDATEUISTATE:
@@ -979,6 +1136,7 @@ int Page::ToggleRow(int y, const wstr& text, bool value, std::function<void(bool
     int rowH = S(34);
     auto* tg = new Toggle();
     tg->on = value;
+    tg->name = text;
     Add(tg, X0 + IW - S(54), y + (rowH - S(30)) / 2, S(54), S(30));
     Label* l = MakeLabel(text, 15.5f, false, Theme::Text(), X0, y, IW - S(70), true, Theme::Card());
     l->y = y + std::max(0, (rowH - l->h) / 2);
@@ -991,7 +1149,9 @@ void Page::Build() {
     if (!hwnd || building) return;
     building = true;
     Theme::Refresh();
-    SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);
+    // WM_SETREDRAW TRUE would also make a hidden window visible: only for one that is shown
+    bool shown = IsWindowVisible(hwnd) != FALSE;
+    if (shown) SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);
     HWND focused = GetFocus();
     bool hadFocus = focused && (focused == hwnd || IsChild(hwnd, focused));
     for (auto& c : controls) {
@@ -1028,6 +1188,7 @@ void Page::Build() {
         yy += sub->h + S(14);
         auto* seg = new Segmented();
         seg->K = k;
+        seg->name = T(L"settings.size.title");
         const int sizes[] = { Settings::SmallSize, Settings::MediumSize, Settings::LargeSize };
         seg->items.push_back(Texts::F(L"settings.size.small", { { L"px", Util::Inv(sizes[0]) } }));
         seg->items.push_back(Texts::F(L"settings.size.medium", { { L"px", Util::Inv(sizes[1]) } }));
@@ -1078,7 +1239,12 @@ void Page::Build() {
             FixMode m = modes[i];
             mc->picked = [this, mc, m, cards3]() {
                 edit.mode = m;
-                for (ModeCard* c : *cards3) { c->checked = c == mc; c->Invalidate(); }
+                for (ModeCard* c : *cards3) {
+                    bool was = c->checked;
+                    c->checked = c == mc;
+                    c->Invalidate();
+                    if (was != c->checked) Acc::StateChanged(c->hwnd);
+                }
                 SaveNow();
             };
         }
@@ -1132,12 +1298,15 @@ void Page::Build() {
             pat->SetInvalid(!rule.re.re);
             Tip(pat->hwnd, T(L"settings.min.pattern"));
             Tip(pat->edit, rule.re.error.empty() ? T(L"settings.min.pattern") : Texts::F(L"settings.min.invalid", { { L"error", rule.re.error } }));
+            Acc::Name(pat->edit, T(L"settings.min.pattern"));
             x += S(210) + S(14);
             InputBox* wBox = MakeInput(normal, x, y, S(68), rowH, Util::Inv(rule.minWidth));
+            Acc::Name(wBox->edit, T(L"settings.min.width"));
             x += S(68);
             MakeLabel(L"\u00d7", 15, false, Theme::Sub(), x + S(4), y + (rowH - S(20)) / 2, S(22), false, card);
             x += S(26);
             InputBox* hBox = MakeInput(normal, x, y, S(68), rowH, Util::Inv(rule.minHeight));
+            Acc::Name(hBox->edit, T(L"settings.min.height"));
             x += S(68);
             MakeLabel(L"px", 15, false, Theme::Sub(), x + S(6), y + (rowH - S(20)) / 2, S(34), false, card);
             x += S(40);
@@ -1146,9 +1315,11 @@ void Page::Build() {
             rm->K = k;
             rm->back = card;
             rm->bold = false;
+            rm->name = T(L"settings.min.remove");
             int rmW = S(26);
             InputBox* note = MakeInput(normal, x, y, X0 + IW - rmW - S(10) - x, rowH, rule.note);
             Tip(note->edit, T(L"settings.min.note"));
+            Acc::Name(note->edit, T(L"settings.min.note"));
             Add(rm, X0 + IW - rmW, y, rmW, rowH);
             Tip(rm->hwnd, T(L"settings.min.remove"));
             size_t index = i;
@@ -1222,6 +1393,10 @@ void Page::Build() {
         EnableWindow(test->hwnd, !edit.hotkey.empty() && !recording);
         test->clicked = [this]() { StartTest(); };
         change->clicked = [this, change]() { ShowHotkeyMenu(change); };
+        test->name = T(L"settings.xray.hotkey") + L": " + test->label;
+        change->name = T(L"settings.xray.hotkey") + L": " + change->label;
+        test->UpdateName();
+        change->UpdateName();
         y += rowH;
         if (!hkStatus.empty()) {
             Label* st = MakeLabel(hkStatus, 14, false, hkStatusColor, X0, y + S(6), IW, true, card);
@@ -1232,6 +1407,7 @@ void Page::Build() {
         auto* picker = new CornerPicker();
         picker->value = edit.hotCorner;
         picker->back = card;
+        picker->name = T(L"settings.xray.corner") + L": " + CornerText(edit.hotCorner);
         Add(picker, X0 + S(132), y, S(56), rowH);
         Label* desc = MakeLabel(CornerText(edit.hotCorner), 15, false, Theme::Sub(), X0 + S(132) + S(56) + S(14), y + (rowH - S(22)) / 2, S(220), false, card);
         picker->changed = [this, picker, desc]() {
@@ -1240,6 +1416,9 @@ void Page::Build() {
             desc->w = Draw::MeasureGdi(desc->text, desc->font, S(220), false).cx + S(4);
             MoveCtl(desc);
             desc->Invalidate();
+            desc->UpdateName();
+            picker->name = T(L"settings.xray.corner") + L": " + desc->text;
+            picker->UpdateName();
             SaveNow();
         };
         wstr smText = T(L"settings.xray.minimized");
@@ -1249,6 +1428,7 @@ void Page::Build() {
         auto* showMin = new Toggle();
         showMin->on = edit.showMinimized;
         showMin->back = card;
+        showMin->name = smText;
         Add(showMin, X0 + IW - S(54), y + (rowH - S(30)) / 2, S(54), S(30));
         MakeLabel(smText, 15.5f, false, Theme::Text(), X0 + IW - S(54) - S(14) - smW, y + (rowH - S(22)) / 2, smW + S(4), false, card);
         showMin->changed = [this, showMin]() { edit.showMinimized = showMin->on; SaveNow(); };
@@ -1302,6 +1482,7 @@ void Page::Build() {
             InputBox* box = MakeInput(Draw::GdiFont(15 * k, false), cx, cy, std::min(bw, fx1 - fx0), chipH, L"");
             cx += bw + gap;
             Tip(box->edit, T(L"settings.exclude.prompt"));
+            Acc::Name(box->edit, T(L"settings.exclude.prompt"));
             box->key = [this, box](UINT vk) {
                 if (vk == VK_RETURN) { AddApp(box->Text()); return true; }
                 if (vk == VK_ESCAPE) { addingApp = false; Rebuild(); return true; }
@@ -1327,11 +1508,13 @@ void Page::Build() {
         auto* start = new Toggle();
         start->on = edit.startWithWindows;
         start->back = page;
+        start->name = T(L"settings.start");
         Add(start, M + S(2), y + (rowH - S(30)) / 2, S(54), S(30));
         start->changed = [this, start]() { edit.startWithWindows = start->on; SaveNow(); };
         MakeLabel(T(L"settings.start"), 15.5f, false, Theme::Text(), M + S(66), y + (rowH - S(22)) / 2, S(260), false, page);
         auto* combo = new DropButton();
         combo->back = page;
+        combo->name = T(L"settings.language");
         std::vector<std::pair<wstr, wstr>> langs = Texts::Available();
         auto codes = std::make_shared<std::vector<wstr>>();
         combo->items.push_back(Texts::F(L"settings.language.auto", { { L"language", AutoLanguageName(langs) } }));
@@ -1380,8 +1563,10 @@ void Page::Build() {
     contentH = y;
     ApplySize();
     ScrollTo(oldScroll);
-    SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
-    RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
+    if (shown) {
+        SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
+        RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN);
+    }
     if (focusAfterBuild) {
         InputBox* fb = focusAfterBuild;
         focusAfterBuild = nullptr;
@@ -1507,7 +1692,15 @@ LRESULT CALLBACK PageProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_SETTINGCHANGE:
-            p->Rebuild();
+            // light or dark mode changed: repaint the page in the new theme
+            if (lp && wcscmp((const wchar_t*)lp, L"ImmersiveColorSet") == 0) {
+                bool was = Theme::dark;
+                Theme::Refresh();
+                if (was != Theme::dark) {
+                    Native::SetDarkTitleBar(h, Theme::dark);
+                    p->Rebuild();
+                }
+            }
             break;
         case WM_CLOSE:
             p->Closed();
@@ -1640,8 +1833,8 @@ Gdiplus::Bitmap* SettingsWindow::Snapshot() {
         g.SetSmoothingMode(SmoothingModeAntiAlias);
         p.PaintBackground(g, 0);
     }
-    for (auto& c : p.controls) {
-        if (!c->hwnd || !IsWindowVisible(c->hwnd)) continue;
+    for (auto& c : p.controls) {   // the page's current controls (not the ones a rebuild replaced)
+        if (!c->hwnd) continue;
         {
             Graphics g(dc);
             g.TranslateTransform((REAL)c->x, (REAL)c->y);

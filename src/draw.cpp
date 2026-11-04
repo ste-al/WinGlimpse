@@ -603,6 +603,8 @@ void DrawItem(Graphics& g, const ItemData& d, int w, int h, bool selected, float
 }
 } // namespace
 
+bool IsOpen() { return ctx.active; }
+
 bool OwnerDraw(UINT m, WPARAM wp, LPARAM lp, LRESULT& result) {
     if (!ctx.active) return false;
     if (m == WM_MEASUREITEM) {

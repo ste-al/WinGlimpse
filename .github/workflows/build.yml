@@ -85,6 +85,29 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Glimpse.ps1 -SelfTest -Cases tests\geometry-cases.txt | Tee-Object selftest-ps1.txt
           exit $LASTEXITCODE
 
+      - name: PowerShell build starts in the background without a console window
+        shell: powershell
+        run: |
+          function Running { $m = $null; if ([System.Threading.Mutex]::TryOpenExisting('Local\Glimpse.SingleInstance', [ref]$m)) { $m.Dispose(); return $true }; return $false }
+          $dir = Join-Path $env:RUNNER_TEMP 'ps1-background'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $ini = Join-Path $dir 'Glimpse.ini'
+          (Get-Content -Raw Glimpse.ini) -replace 'HotCorner=TopLeft', 'HotCorner=Off' | Set-Content -LiteralPath $ini -Encoding UTF8
+          # WaitForExit, not Start-Process -Wait: that would also wait for the detached Glimpse
+          $p = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '.\Glimpse.ps1', '-Background', '-Ini', "`"$ini`"" -PassThru
+          if (-not $p.WaitForExit(60000)) { throw 'Glimpse.ps1 -Background did not return' }
+          if ($p.ExitCode -ne 0) { throw "Glimpse.ps1 -Background exited with $($p.ExitCode)" }
+          for ($i = 0; $i -lt 120 -and -not (Running); $i++) { Start-Sleep -Milliseconds 500 }
+          if (-not (Running)) { throw 'Glimpse did not start in the background' }
+          $detached = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like '*-Detached*' })
+          if ($detached.Count -ne 1) { throw "expected one detached powershell.exe, found $($detached.Count)" }
+          Write-Host "Glimpse runs in a detached powershell.exe (pid $($detached[0].ProcessId))"
+          $q = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '.\Glimpse.ps1', '-Exit' -PassThru
+          [void]$q.WaitForExit(60000)
+          for ($i = 0; $i -lt 40 -and (Running); $i++) { Start-Sleep -Milliseconds 500 }
+          if (Running) { throw 'Glimpse.ps1 -Exit did not stop the background Glimpse' }
+          Write-Host 'Glimpse.ps1 -Exit stopped it'
+
       - name: Language files
         shell: powershell
         run: |
