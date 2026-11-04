@@ -4965,13 +4965,8 @@ settings.done = Done
             var g = group ?? new UndoGroup { Reason = cause.ToString() };
             Apply(list, o, cause, g);
             if (group == null) Undo.Push(g);
-            lastMoved = g.Items.Count;
-            lastGroup = g;
             return o;
         }
-
-        int lastMoved;
-        UndoGroup lastGroup;
 
         void Apply(List<TrackedWindow> list, Outcome o, Cause cause, UndoGroup g)
         {
@@ -6101,7 +6096,6 @@ settings.done = Done
                 else if (w.State == 2)
                 {
                     els.Add(Outline(w.Frame, dpi, Theme.Red, true, 36, 2.5f));
-                    Rc at = w.Zone != null ? w.Zone.Rect : w.Frame;
                     els.Add(Pill(w.Frame.L + (int)(12 * k), w.Frame.T + (int)(12 * k), dpi, w.Title, icon, w.Title, Color.FromArgb(239, 68, 68), Color.Empty, Color.White, 2, Color.FromArgb(255, 255, 255, 255), 260));
                     string reason = ReasonText(w.Reason);
                     els.Add(Callout(w.Frame.L + (int)(12 * k), w.Frame.T + (int)(56 * k), dpi, Texts.T("drag.wouldBeHidden"), reason, screenAt(w.Frame)));

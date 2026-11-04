@@ -40,6 +40,7 @@
     <Compile Include="../Glimpse.cs" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
+    <Reference Include="Accessibility" />
     <!-- reference assemblies, so the build needs no .NET Framework developer pack (and works on Linux) -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="all" Condition="'$(TargetFramework)' == 'net472'" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net481" Version="1.0.3" PrivateAssets="all" Condition="'$(TargetFramework)' == 'net481'" />

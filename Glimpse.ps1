@@ -136,7 +136,7 @@ if ($Background -and -not $Detached -and -not $Settings -and -not $Exit) {
 # Compile Glimpse.cs with the C# compiler of the .NET Framework (C# 5), once per PowerShell process.
 if (-not ('Glimpse.Program' -as [type])) {
     try {
-        Add-Type -Path $source -ReferencedAssemblies 'System.Windows.Forms', 'System.Drawing', 'System.Core' -IgnoreWarnings
+        Add-Type -Path $source -ReferencedAssemblies 'System.Windows.Forms', 'System.Drawing', 'System.Core', 'Accessibility' -IgnoreWarnings
     } catch {
         Show-GlimpseError ("Glimpse.cs could not be compiled: " + $_.Exception.Message)
         exit 1

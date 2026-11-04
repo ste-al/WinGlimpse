@@ -73,6 +73,16 @@ build_one() { # architecture folder
 build_one x64 x64
 build_one arm64 arm64
 
+if command -v mcs >/dev/null 2>&1; then
+  # Glimpse.ps1 compiles Glimpse.cs with Add-Type and only the assemblies it lists: check that list
+  echo "== PowerShell build references"
+  refs=$(grep -o "ReferencedAssemblies [^-]*" Glimpse.ps1 | grep -o "'[^']*'" | tr -d "'" | sed 's/^/-r:/; s/$/.dll/' | tr '\n' ' ')
+  # shellcheck disable=SC2086
+  mcs -noconfig -nologo -target:library -langversion:5 -r:System.dll $refs -out:"$out/addtype-check.dll" Glimpse.cs > "$out/addtype-check.txt" 2>&1 \
+    || { grep -v ' warning ' "$out/addtype-check.txt" >&2; echo "Glimpse.cs does not compile with the references Glimpse.ps1 gives Add-Type" >&2; exit 1; }
+  rm -f "$out/addtype-check.dll"
+fi
+
 if command -v mono >/dev/null 2>&1; then
   echo "== self-test (Mono)"
   mono "$out/x64/Glimpse.exe" /selftest:tests/geometry-cases.txt | tee "$out/selftest.txt" | grep -v '^ok' || true
