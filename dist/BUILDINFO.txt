@@ -1,6 +1,6 @@
 Glimpse 1.0.0
 Built by build.sh from these sources (sha256):
-119a3a493c11fc4d520ddcfa2065268e5b3d2467bb0762f9fc460e6c52e1728d  Glimpse.cs
+fca666dbd39f2fe435288f3ac16594472393554c19715f955e2f5bb6475cbaea  Glimpse.cs
 22cdce4b6fafb3808245e32dedbfde00be087d83d58295d0cc2a7b7ab260dac6  Glimpse.ps1
 e71f97978360f8492e502f6c9a1727f6ab3ee5234347f47ea96846f957e9a46e  Glimpse.manifest
 12eaa4db88d576ccd8efdaebfdfd68f813458a93c15475ba3838360236cbb38f  Glimpse.ico

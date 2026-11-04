@@ -284,7 +284,7 @@ namespace Glimpse
             WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105, WM_SYSCHAR = 0x0106, WM_TIMER = 0x0113, WM_MOUSEMOVE = 0x0200,
             WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202, WM_LBUTTONDBLCLK = 0x0203, WM_RBUTTONDOWN = 0x0204,
             WM_RBUTTONUP = 0x0205, WM_MOUSEWHEEL = 0x020A, WM_WTSSESSION_CHANGE = 0x02B1, WM_DPICHANGED = 0x02E0,
-            WM_HOTKEY = 0x0312, WM_NCLBUTTONDOWN = 0x00A1, WM_GETDLGCODE = 0x0087;
+            WM_HOTKEY = 0x0312, WM_NCLBUTTONDOWN = 0x00A1, WM_GETDLGCODE = 0x0087, WM_KEYFIRST = 0x0100, WM_KEYLAST = 0x0109;
         public const int WA_INACTIVE = 0, MA_NOACTIVATE = 3;
         public const int DLGC_WANTARROWS = 0x0001, DLGC_WANTTAB = 0x0002, DLGC_WANTALLKEYS = 0x0004, DLGC_WANTCHARS = 0x0080;
 
@@ -374,6 +374,10 @@ namespace Glimpse
 
         // ---- cursor, keyboard
         [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public POINT pt; }
+        [DllImport("user32.dll")] public static extern bool TranslateMessage(ref MSG m);
+        [DllImport("user32.dll")] public static extern IntPtr DispatchMessage(ref MSG m);
         [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
         public const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12,
             VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3, VK_LMENU = 0xA4, VK_RMENU = 0xA5;
@@ -6510,10 +6514,33 @@ settings.done = Done
         readonly WinTimer digitTimer = new WinTimer { Interval = 700 };
         public bool IsOpen { get { return surfaces.Count > 0; } }
 
+        readonly KeyFilter keys;
+
         public XRayView(GlimpseApp app)
         {
             this.app = app;
             digitTimer.Tick += delegate { digitTimer.Stop(); PickNumber(true); };
+            keys = new KeyFilter(this);
+            Application.AddMessageFilter(keys);
+        }
+
+        /// <summary>
+        /// Hands key messages for X-ray to X-ray. Its windows are not WinForms Controls, so the WinForms message loop
+        /// would pass them to IsDialogMessage, which turns Esc and Enter into commands and swallows typed characters.
+        /// </summary>
+        sealed class KeyFilter : IMessageFilter
+        {
+            readonly XRayView view;
+            public KeyFilter(XRayView view) { this.view = view; }
+
+            public bool PreFilterMessage(ref Message m)
+            {
+                if (m.Msg < Native.WM_KEYFIRST || m.Msg > Native.WM_KEYLAST || !view.IsOpen || !view.Owns(m.HWnd)) return false;
+                var msg = new Native.MSG { hwnd = m.HWnd, message = (uint)m.Msg, wParam = m.WParam, lParam = m.LParam };
+                Native.TranslateMessage(ref msg);   // WM_CHAR with the user's layout (AltGr, dead keys); it comes back through here
+                Native.DispatchMessage(ref msg);
+                return true;
+            }
         }
 
         /// <summary>Builds the list of windows (most recently used first, minimized ones last).</summary>
@@ -6848,6 +6875,7 @@ settings.done = Done
         public void Dispose()
         {
             Close();
+            Application.RemoveMessageFilter(keys);
             digitTimer.Dispose();
         }
     }
@@ -6942,8 +6970,8 @@ settings.done = Done
                         m.Result = IntPtr.Zero;
                         return;
                     case Native.WM_GETDLGCODE:
-                        // the WinForms message loop runs IsDialogMessage for windows that are not Controls, and that
-                        // would turn Esc and Enter into commands and eat arrows, Tab and typing: X-ray wants every key
+                        // keys normally come through XRayView.KeyFilter, past IsDialogMessage; should another message
+                        // loop run IsDialogMessage on X-ray, it still gets every key
                         m.Result = (IntPtr)(Native.DLGC_WANTALLKEYS | Native.DLGC_WANTARROWS | Native.DLGC_WANTTAB | Native.DLGC_WANTCHARS);
                         return;
                 }
