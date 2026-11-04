@@ -50,7 +50,8 @@ the internet-zone mark (file Properties → Unblock).
 3. Glimpse lives in the notification area. **Left-click** the icon for X-ray, **right-click** for
    the menu: X-ray, Arrange now, Undo last fix, Pause (15 min, 1 h, until tomorrow), Settings, Exit.
 
-Start Glimpse again to open Settings. "Start with Windows" is on by default (per user, under
+Start Glimpse again to open Settings. "Start with Windows" is optional and off by default; when you
+turn it on, Glimpse registers itself for your user only (under
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, with `/background` and any `/ini:` you used).
 
 ## How it works
@@ -128,7 +129,7 @@ options:
 | `[Glimpse] RememberSizes` | 1 / 0 (sizes go to `%LOCALAPPDATA%\Glimpse\Memory.ini`) | `1` |
 | `[Glimpse] MaxWindows` | automatic fixes cover this many recently used windows | `30` |
 | `[Glimpse] Language` | `auto` (Windows display language) or `en`, `de`, `cs`, `sk`, any `lang\*.txt` | `auto` |
-| `[Glimpse] StartWithWindows` | 1 / 0 (HKCU Run entry) | `1` |
+| `[Glimpse] StartWithWindows` | 1 / 0, optional (HKCU Run entry) | `0` |
 | `[Glimpse] LogLevel` | `Info` or `Debug` (Debug also logs window titles) | `Info` |
 | `[XRay] Hotkey` | `Ctrl+Alt+Space`, `Ctrl+Shift+Alt+Space`, `Ctrl+Alt+Enter`, `Pause`, any combination, or `Off` | `Ctrl+Alt+Space` |
 | `[XRay] HotCorner` | `TopLeft`, `TopRight`, `BottomLeft`, `BottomRight`, `Off` | `TopLeft` |
@@ -159,7 +160,7 @@ Glimpse runs once per user session (a mutex in the session's `Local\` namespace)
 session is locked or disconnected, and needs no admin rights.
 
 - **Each user** runs their own copy, for example in `%LOCALAPPDATA%\Glimpse` with `Glimpse.ini`
-  beside it. Settings → Start with Windows registers it for that user.
+  beside it. Settings → Start with Windows (off by default) registers it for that user.
 - **For all users at once**, run [`deploy/Start-Glimpse.cmd`](deploy/Start-Glimpse.cmd) as a logon
   script from a share that holds the Glimpse files. It copies `Glimpse.exe` and `lang\` into each
   user's folder when they are missing or older, never overwrites a user's `Glimpse.ini`, and starts

@@ -1178,7 +1178,7 @@ namespace Glimpse
         public bool RememberSizes = true;
         public int MaxWindows = 30;
         public string Language = "auto";
-        public bool StartWithWindows = true;
+        public bool StartWithWindows;          // optional, off by default
         public bool DebugLog;
         public string Hotkey = "Ctrl+Alt+Space";
         public Corner HotCorner = Corner.TopLeft;
@@ -1211,8 +1211,8 @@ namespace Glimpse
 "MaxWindows=30\r\n" +
 "; auto follows the Windows display language; or en, de, cs, sk\r\n" +
 "Language=auto\r\n" +
-"; start Glimpse when you sign in (per user, no admin rights needed)\r\n" +
-"StartWithWindows=1\r\n" +
+"; optional: start Glimpse when you sign in (1), per user, no admin rights needed\r\n" +
+"StartWithWindows=0\r\n" +
 "; Info or Debug (Debug also writes window titles to the log)\r\n" +
 "LogLevel=Info\r\n" +
 "\r\n" +
@@ -1264,7 +1264,7 @@ namespace Glimpse
             s.MaxWindows = Util.ParseInt(ini.Get("Glimpse", "MaxWindows"), 30, 1, 500);
             v = ini.Get("Glimpse", "Language");
             s.Language = string.IsNullOrEmpty(v) ? "auto" : v.Trim();
-            s.StartWithWindows = Util.ParseBool(ini.Get("Glimpse", "StartWithWindows"), true);
+            s.StartWithWindows = Util.ParseBool(ini.Get("Glimpse", "StartWithWindows"), false);
             v = ini.Get("Glimpse", "LogLevel");
             s.DebugLog = v != null && v.Trim().Equals("debug", StringComparison.OrdinalIgnoreCase);
 
@@ -3180,6 +3180,8 @@ settings.done = Done
             Eq("Ctrl+Alt+Space", def.Hotkey, "settings: default hotkey");
             Eq(Corner.TopLeft, def.HotCorner, "settings: default hot corner");
             Eq(0, def.Exclusions.Count, "settings: no exclusions by default");
+            Eq(false, def.StartWithWindows, "settings: Start with Windows is off by default");
+            Eq(false, Settings.FromIni(IniFile.FromText("[Glimpse]\r\n")).StartWithWindows, "settings: Start with Windows stays off when the key is missing");
             Eq(0, def.Problems.Count, "settings: defaults have no problems");
 
             var st = Settings.Defaults();

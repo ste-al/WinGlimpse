@@ -12,8 +12,8 @@ Start
                                      PowerShell build (Glimpse.cs must sit next to it)
 
 Glimpse lives in the notification area: left-click the icon for X-ray, right-click for the menu
-(X-ray, Arrange now, Undo last fix, Pause, Settings, Exit). Nothing is installed; Settings has
-"Start with Windows" (per user, no admin rights).
+(X-ray, Arrange now, Undo last fix, Pause, Settings, Exit). Nothing is installed; Settings has an
+optional "Start with Windows" (off by default; per user, no admin rights).
 
 What it does
 ------------
