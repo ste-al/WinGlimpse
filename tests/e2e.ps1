@@ -8,9 +8,9 @@
       2. a window dropped so it covers all of another one but a 30 px strip nudges the covered
          window by the smallest move that gives it back a glimpse;
       3. the toast's Undo restores the nudged window's exact rectangle;
-      4. Ctrl+Alt+Space opens X-ray, Esc closes it;
-      5. a second start with /settings opens the settings window, and its controls have names and
-         roles for screen readers (UI Automation);
+      4. Ctrl+Alt+Space opens X-ray with the keyboard focus, Esc closes it;
+      5. a second start with /settings opens the settings window, and its controls have names,
+         roles and states for screen readers (MSAA);
       6. Glimpse keeps running through all of it, /exit closes it, and the log has no errors.
     The test windows come from a small WinForms program compiled on the fly (no console windows), and
     every other window is minimized first, so only the test windows count.
@@ -54,6 +54,19 @@ public static class E2E
     public static IntPtr FindTitle(string title) { return FindWindow(null, title); }
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+    // class and title, for messages
+    public static string Describe(IntPtr h)
+    {
+        if (h == IntPtr.Zero) return "none";
+        var c = new System.Text.StringBuilder(256);
+        var t = new System.Text.StringBuilder(256);
+        GetClassName(h, c, 256);
+        GetWindowText(h, t, 256);
+        return c + " \"" + t + "\"";
+    }
     public static RECT Frame(IntPtr h)
     {
         RECT r;
@@ -63,6 +76,43 @@ public static class E2E
 }
 '@
 [void][E2E]::SetProcessDPIAware()
+
+# what a screen reader that uses MSAA (NVDA, JAWS) reads from the child windows of a window
+Add-Type -ReferencedAssemblies Accessibility -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class Msaa
+{
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc proc, IntPtr l);
+    [DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr h, uint id, ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object acc);
+    public sealed class Item { public string Name; public int Role; public int State; }
+    public static Item[] Children(IntPtr top)
+    {
+        var list = new List<Item>();
+        EnumChildWindows(top, delegate(IntPtr h, IntPtr l)
+        {
+            Guid iid = new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");   // IAccessible
+            object o;
+            if (AccessibleObjectFromWindow(h, 0xFFFFFFFC, ref iid, out o) == 0)   // OBJID_CLIENT
+            {
+                var a = o as Accessibility.IAccessible;
+                if (a != null)
+                {
+                    var it = new Item();
+                    try { it.Name = a.get_accName(0); } catch { }
+                    try { object r = a.get_accRole(0); if (r is int) it.Role = (int)r; } catch { }
+                    try { object st = a.get_accState(0); if (st is int) it.State = (int)st; } catch { }
+                    list.Add(it);
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return list.ToArray();
+    }
+}
+'@
 
 $failed = 0
 $results = New-Object 'System.Collections.Generic.List[string]'
@@ -252,6 +302,8 @@ try {
     Shot '4-xray'
     $xray = [E2E]::FindTitle('Glimpse X-ray')
     Check ($xray -ne [IntPtr]::Zero) 'Ctrl+Alt+Space opens X-ray' ''
+    $fgw = [E2E]::GetForegroundWindow()
+    Check ($xray -ne [IntPtr]::Zero -and $fgw -eq $xray) 'X-ray has the keyboard focus' ('foreground: ' + [E2E]::Describe($fgw))
     Keys @(0x1B)
     Start-Sleep -Seconds 1
     $xray = [E2E]::FindTitle('Glimpse X-ray')
@@ -266,21 +318,29 @@ try {
     Shot '5-settings'
     Check ($settings -ne [IntPtr]::Zero) 'a second start with /settings opens Settings' ''
     if ($settings -ne [IntPtr]::Zero) {
-        # the custom-drawn controls tell screen readers what they are
+        # the custom-drawn controls tell screen readers what they are (MSAA: role 0x2C check button,
+        # 0x2D radio button; state 0x10 checked)
+        try {
+            $items = @([Msaa]::Children($settings))
+            $named = @($items | Where-Object { $_.Name } | ForEach-Object { '{0} [{1:X}/{2:X}]' -f $_.Name, $_.Role, $_.State })
+            Write-Host ("MSAA: " + $items.Count + " windows; " + ($named -join '; '))
+            $start = @($items | Where-Object { $_.Role -eq 0x2C -and $_.Name -eq 'Start with Windows' })
+            $modes = @($items | Where-Object { $_.Role -eq 0x2D -and $_.Name -match '^(Guide|Assist|Strict)' })
+            $chosen = @($modes | Where-Object { $_.State -band 0x10 })
+            $detail = ($named | Select-Object -First 14) -join '; '
+            Check ($start.Count -eq 1) 'Settings: screen readers see the Start with Windows toggle as a check box' $detail
+            Check ($modes.Count -eq 3 -and $chosen.Count -eq 1) 'Settings: screen readers see the mode cards as radio buttons, one selected' $detail
+        } catch {
+            Check $false 'Settings: MSAA' $_.Exception.Message
+        }
+        # UI Automation (Narrator): reported for information
         try {
             Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
-            $ua = [System.Windows.Automation.AutomationElement]
-            $types = [System.Windows.Automation.ControlType]
-            $all = @($ua::FromHandle($settings).FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
+            $all = @([System.Windows.Automation.AutomationElement]::FromHandle($settings).FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
             $seen = @($all | ForEach-Object { $_.Current.ControlType.ProgrammaticName.Replace('ControlType.', '') + ' ' + $_.Current.Name } | Where-Object { $_ -notmatch ' $' })
-            $start = @($all | Where-Object { $_.Current.ControlType -eq $types::CheckBox -and $_.Current.Name -eq 'Start with Windows' })
-            $modes = @($all | Where-Object { $_.Current.ControlType -eq $types::RadioButton -and $_.Current.Name -match '^(Guide|Assist|Strict)' })
-            $detail = ($seen | Select-Object -First 12) -join '; '
-            Check ($start.Count -eq 1) 'Settings: the Start with Windows toggle is a named check box' $detail
-            Check ($modes.Count -eq 3) 'Settings: the three mode cards are named radio buttons' $detail
             Write-Host ("UI Automation: " + $all.Count + " elements; " + (($seen | Select-Object -First 40) -join '; '))
         } catch {
-            Check $false 'Settings: UI Automation' $_.Exception.Message
+            Write-Host ("UI Automation: " + $_.Exception.Message)
         }
         [void][E2E]::PostMessage($settings, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
     }

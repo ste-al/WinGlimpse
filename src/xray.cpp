@@ -96,8 +96,8 @@ void XRayView::Show(bool fromKeyboard) {
     }
     RenderAll();
     for (auto& s : surfaces) s->ShowNow();
-    if (main) Native::ForceForeground(main->hwnd);
-    Log::Debug(L"x-ray opened with " + Util::Inv((long long)entries.size()) + L" windows" + (fromKeyboard ? L" (hotkey)" : L""));
+    const wchar_t* fg = main ? Native::ForceForeground(main->hwnd) : L"no";
+    Log::Debug(L"x-ray opened with " + Util::Inv((long long)entries.size()) + L" windows" + (fromKeyboard ? L" (hotkey)" : L"") + L", foreground: " + fg);
 }
 
 void XRayView::Close() {

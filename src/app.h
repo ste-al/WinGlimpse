@@ -28,7 +28,7 @@ void SetRoundCorners(HWND hwnd, bool smallRadius);
 int IntegrityLevel(DWORD pid);   // 0: this process; -1 when it cannot be read
 wstr ProcessFileName(DWORD pid);
 bool KeyDown(int vk);
-void ForceForeground(HWND hwnd);
+const wchar_t* ForceForeground(HWND hwnd);   // how the window got the foreground: "direct", "after input", "after attach" or "no"
 wstr WindowText(HWND hwnd);
 wstr ClassName(HWND hwnd);
 POINT CursorPos();

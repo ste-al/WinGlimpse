@@ -97,16 +97,16 @@ wstr ProcessFileName(DWORD pid) {
 
 bool KeyDown(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
-void ForceForeground(HWND hwnd) {
-    if (!hwnd) return;
-    if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
+const wchar_t* ForceForeground(HWND hwnd) {
+    if (!hwnd) return L"no";
+    if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return L"direct";
     // Windows lets the process that received the last input event take the foreground. When the input
     // that opened us has already gone elsewhere (the hotkey's key-up events), an input event of our own
     // makes us that process: an empty mouse event, no movement, no button.
     INPUT input = {};
     input.type = INPUT_MOUSE;
     SendInput(1, &input, sizeof input);
-    if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
+    if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return L"after input";
     HWND fg = GetForegroundWindow();
     DWORD pid;
     DWORD fgThread = fg ? GetWindowThreadProcessId(fg, &pid) : 0;
@@ -115,6 +115,7 @@ void ForceForeground(HWND hwnd) {
     BringWindowToTop(hwnd);
     SetForegroundWindow(hwnd);
     if (attached) AttachThreadInput(me, fgThread, FALSE);
+    return GetForegroundWindow() == hwnd ? L"after attach" : L"no";
 }
 
 wstr WindowText(HWND h) {

@@ -602,15 +602,16 @@ namespace Glimpse
         public struct INPUT { public uint type; public MOUSEINPUT mi; }   // MOUSEINPUT is the largest member of the union
         [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
 
-        public static void ForceForeground(IntPtr hwnd)
+        /// <summary>Brings a window of ours to the foreground; says how: "direct", "after input", "after attach" or "no".</summary>
+        public static string ForceForeground(IntPtr hwnd)
         {
-            if (!IsWindows || hwnd == IntPtr.Zero) return;
-            if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
+            if (!IsWindows || hwnd == IntPtr.Zero) return "no";
+            if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return "direct";
             // Windows lets the process that received the last input event take the foreground. When the
             // input that opened us has already gone elsewhere (the hotkey's key-up events, a slow start),
             // an input event of our own makes us that process: an empty mouse event, no movement, no button.
             try { SendInput(1, new INPUT[1], Marshal.SizeOf(typeof(INPUT))); } catch { }
-            if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return;
+            if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd) return "after input";
             IntPtr fg = GetForegroundWindow();
             uint pid;
             uint fgThread = fg == IntPtr.Zero ? 0 : GetWindowThreadProcessId(fg, out pid);
@@ -625,6 +626,7 @@ namespace Glimpse
             {
                 if (attached) AttachThreadInput(me, fgThread, false);
             }
+            return GetForegroundWindow() == hwnd ? "after attach" : "no";
         }
     }
 
@@ -6552,8 +6554,8 @@ settings.done = Done
             }
             RenderAll();
             foreach (var s in surfaces) s.ShowNow();
-            if (main != null) Native.ForceForeground(main.Handle);
-            Log.Debug("x-ray opened with " + Entries.Count + " windows" + (fromKeyboard ? " (hotkey)" : ""));
+            string fg = main != null ? Native.ForceForeground(main.Handle) : "no";
+            Log.Debug("x-ray opened with " + Entries.Count + " windows" + (fromKeyboard ? " (hotkey)" : "") + ", foreground: " + fg);
         }
 
         public void Close()
