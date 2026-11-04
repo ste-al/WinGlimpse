@@ -1,0 +1,41 @@
+// Glimpse native build: icon, manifest, built-in English texts and default settings.
+// Compile from the repository root: rc /I src /fo Glimpse.res src\Glimpse.rc  (or llvm-rc / windres)
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include <winres.h>
+#include "resource.h"
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+
+IDI_GLIMPSE ICON "Glimpse.ico"
+1 24 "Glimpse.manifest"
+IDR_EN_TXT RCDATA "lang/en.txt"
+IDR_DEFAULT_INI RCDATA "Glimpse.ini"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "CompanyName", "Glimpse"
+            VALUE "FileDescription", "Glimpse - keep every window within reach (native)"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "Glimpse"
+            VALUE "LegalCopyright", "Licensed under GPL-3.0-or-later"
+            VALUE "OriginalFilename", "Glimpse.exe"
+            VALUE "ProductName", "Glimpse"
+            VALUE "ProductVersion", "1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
+    END
+END

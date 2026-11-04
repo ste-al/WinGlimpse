@@ -3052,7 +3052,13 @@ settings.done = Done
                 TryGuide(L, anchor, f, result, keep, Edge.Right, zr.L, range, new Rc(zr.L - f.W, f.T, zr.L, f.B), zr);
                 TryGuide(L, anchor, f, result, keep, Edge.Left, zr.R, range, new Rc(zr.R, f.T, zr.R + f.W, f.B), zr);
             }
-            result.Sort(delegate(Guide a, Guide b) { return a.Distance.CompareTo(b.Distance); });
+            // by distance; equal distances keep the order they were found in (List.Sort is not stable)
+            for (int k = 0; k < result.Count; k++) result[k].Seq = k;
+            result.Sort(delegate(Guide a, Guide b)
+            {
+                int c = a.Distance.CompareTo(b.Distance);
+                return c != 0 ? c : a.Seq.CompareTo(b.Seq);
+            });
             return result;
         }
 
@@ -3079,6 +3085,7 @@ settings.done = Done
         public Rc Snapped;      // the dragged window's frame on the guide
         public Rc Zone;         // the neighbour's glimpse it clears
         public int Distance;
+        public int Seq;         // order found, breaks distance ties
     }
 
     #endregion

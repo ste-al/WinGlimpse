@@ -127,7 +127,8 @@ While dragging, for every neighbour's glimpse zone Z (computed without the dragg
 dragged frame is aligned so its bottom is at `Z.T`, its top at `Z.B`, its right at `Z.L` or its left
 at `Z.R`. A guide is offered when that is within 60 px (`|dx| + |dy|`), does not cut through Z, lies in
 the work area, and is valid (the dragged window has a glimpse and every neighbour keeps one).
-Guides are sorted by distance. A drop within 12 px of a shown guide snaps to it.
+Guides are sorted by distance; equal distances keep the order they were found in (neighbours in
+input order, then bottom, top, right, left). A drop within 12 px of a shown guide snaps to it.
 
 ## Never fighting (runtime, not in the pure engine)
 
