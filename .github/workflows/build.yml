@@ -1,0 +1,180 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Build and self-test (Linux, .NET SDK + Mono)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Mono and Xvfb
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mono-complete xvfb > /dev/null
+
+      - name: dist/ was built from these sources
+        run: ./build.sh --check-dist
+
+      - name: Build x64 and ARM64 (C# 5), self-test, language check, previews
+        run: ./build.sh --no-dist --no-native
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            out/x64
+            out/arm64
+            out/previews
+            out/selftest.txt
+            out/checklang.txt
+          if-no-files-found: error
+
+  windows:
+    name: ${{ matrix.os }} (${{ matrix.exe }})
+    needs: linux
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            exe: x64
+          - os: windows-2025
+            exe: x64
+          - os: windows-11-arm
+            exe: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: out
+
+      - name: Build with the C# compiler that ships with Windows (C# 5, as on the servers)
+        shell: cmd
+        run: build.cmd anycpu
+
+      - name: Self-test, in-box build
+        shell: powershell
+        run: |
+          $p = Start-Process .\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-inbox.txt
+          Get-Content selftest-inbox.txt
+          exit $p.ExitCode
+
+      - name: Self-test, ${{ matrix.exe }} build from Linux
+        shell: powershell
+        run: |
+          $p = Start-Process out\${{ matrix.exe }}\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-${{ matrix.exe }}.txt
+          Get-Content selftest-${{ matrix.exe }}.txt
+          exit $p.ExitCode
+
+      - name: Self-test, PowerShell build (Windows PowerShell 5.1, Add-Type)
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Glimpse.ps1 -SelfTest -Cases tests\geometry-cases.txt | Tee-Object selftest-ps1.txt
+          exit $LASTEXITCODE
+
+      - name: PowerShell build starts in the background without a console window
+        shell: powershell
+        run: |
+          function Running { $m = $null; if ([System.Threading.Mutex]::TryOpenExisting('Local\Glimpse.SingleInstance', [ref]$m)) { $m.Dispose(); return $true }; return $false }
+          $dir = Join-Path $env:RUNNER_TEMP 'ps1-background'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $ini = Join-Path $dir 'Glimpse.ini'
+          (Get-Content -Raw Glimpse.ini) -replace 'HotCorner=TopLeft', 'HotCorner=Off' | Set-Content -LiteralPath $ini -Encoding UTF8
+          # WaitForExit, not Start-Process -Wait: that would also wait for the detached Glimpse
+          $p = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '.\Glimpse.ps1', '-Background', '-Ini', "`"$ini`"" -PassThru
+          if (-not $p.WaitForExit(60000)) { throw 'Glimpse.ps1 -Background did not return' }
+          if ($p.ExitCode -ne 0) { throw "Glimpse.ps1 -Background exited with $($p.ExitCode)" }
+          for ($i = 0; $i -lt 120 -and -not (Running); $i++) { Start-Sleep -Milliseconds 500 }
+          if (-not (Running)) { throw 'Glimpse did not start in the background' }
+          $detached = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like '*-Detached*' })
+          if ($detached.Count -ne 1) { throw "expected one detached powershell.exe, found $($detached.Count)" }
+          Write-Host "Glimpse runs in a detached powershell.exe (pid $($detached[0].ProcessId))"
+          $q = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '.\Glimpse.ps1', '-Exit' -PassThru
+          [void]$q.WaitForExit(60000)
+          for ($i = 0; $i -lt 40 -and (Running); $i++) { Start-Sleep -Milliseconds 500 }
+          if (Running) { throw 'Glimpse.ps1 -Exit did not stop the background Glimpse' }
+          Write-Host 'Glimpse.ps1 -Exit stopped it'
+
+      - name: Language files
+        shell: powershell
+        run: |
+          $p = Start-Process .\Glimpse.exe -ArgumentList '/checklang' -Wait -PassThru -NoNewWindow -RedirectStandardOutput checklang.txt
+          Get-Content checklang.txt
+          exit $p.ExitCode
+
+      - name: Preview images
+        shell: powershell
+        run: |
+          foreach ($lang in 'en', 'de', 'cs', 'sk', 'qps') {
+            $p = Start-Process .\Glimpse.exe -ArgumentList "/render:previews\$lang", "/renderlang:$lang" -Wait -PassThru -NoNewWindow -RedirectStandardOutput "render-$lang.txt"
+            Get-Content "render-$lang.txt"
+          }
+
+      # required on x64; the ARM64 runner has no taskbar and does not move windows on a synthetic drag
+      - name: End-to-end smoke test (real windows, drag and drop, X-ray, settings)
+        continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
+        shell: powershell
+        run: .\tests\e2e.ps1 -Exe out\${{ matrix.exe }}\Glimpse.exe -Out e2e
+
+      - name: Build the native C++ EXE with Visual Studio (MSVC, /MT)
+        shell: cmd
+        run: build-native.cmd ${{ matrix.exe }}
+
+      - name: Self-test, native MSVC build
+        shell: powershell
+        run: |
+          $p = Start-Process out\native-${{ matrix.exe }}\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-native-msvc.txt
+          Get-Content selftest-native-msvc.txt
+          exit $p.ExitCode
+
+      - name: Self-test, native EXE from dist/ (clang, cross-compiled on Linux)
+        shell: powershell
+        run: |
+          $zip = Get-ChildItem dist\Glimpse-*-native-win-${{ matrix.exe }}.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath dist-native -Force
+          $p = Start-Process dist-native\Glimpse\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-native-dist.txt
+          Get-Content selftest-native-dist.txt
+          $q = Start-Process dist-native\Glimpse\Glimpse.exe -ArgumentList '/checklang' -Wait -PassThru -NoNewWindow -RedirectStandardOutput checklang-native.txt
+          Get-Content checklang-native.txt
+          exit ($p.ExitCode + $q.ExitCode)
+
+      - name: Preview images, native build
+        shell: powershell
+        run: |
+          foreach ($lang in 'en', 'de', 'qps') {
+            $p = Start-Process out\native-${{ matrix.exe }}\Glimpse.exe -ArgumentList "/render:previews-native\$lang", "/renderlang:$lang" -Wait -PassThru -NoNewWindow -RedirectStandardOutput "render-native-$lang.txt"
+            Get-Content "render-native-$lang.txt"
+            if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+          }
+
+      - name: End-to-end smoke test, native build
+        continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
+        shell: powershell
+        run: .\tests\e2e.ps1 -Exe out\native-${{ matrix.exe }}\Glimpse.exe -Out e2e-native
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.os }}
+          path: |
+            selftest-*.txt
+            checklang*.txt
+            previews
+            previews-native
+            e2e
+            e2e-native
+            Glimpse.exe
+            out/native-${{ matrix.exe }}/Glimpse.exe

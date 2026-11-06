@@ -1,0 +1,13 @@
+# build output
+/out/
+/obj/
+/bin/
+/build/obj/
+/build/bin/
+# build.cmd output and test results in the repository root
+/Glimpse.exe
+/selftest*.txt
+/checklang.txt
+/previews/
+/e2e/
+/e2e-out/

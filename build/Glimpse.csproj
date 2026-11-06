@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Builds Glimpse.exe from ../Glimpse.cs with the .NET SDK (used by build.sh and CI).
+    The language level is pinned to C# 5, the level of the csc.exe that ships with Windows,
+    so this build fails exactly where the on-server build (build.cmd) would.
+      dotnet build build/Glimpse.csproj -c Release -p:GlimpseArch=x64      (.NET Framework 4.7.2)
+      dotnet build build/Glimpse.csproj -c Release -p:GlimpseArch=arm64    (.NET Framework 4.8.1)
+      dotnet build build/Glimpse.csproj -c Release -p:GlimpseArch=anycpu   (.NET Framework 4.7.2)
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <GlimpseArch Condition="'$(GlimpseArch)' == ''">x64</GlimpseArch>
+    <TargetFramework Condition="'$(GlimpseArch)' == 'arm64'">net481</TargetFramework>
+    <TargetFramework Condition="'$(GlimpseArch)' != 'arm64'">net472</TargetFramework>
+    <PlatformTarget Condition="'$(GlimpseArch)' == 'arm64'">ARM64</PlatformTarget>
+    <PlatformTarget Condition="'$(GlimpseArch)' == 'x64'">x64</PlatformTarget>
+    <PlatformTarget Condition="'$(GlimpseArch)' == 'anycpu'">AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <LangVersion>5</LangVersion>
+    <AssemblyName>Glimpse</AssemblyName>
+    <RootNamespace>Glimpse</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/..'))=.</PathMap>
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <ApplicationManifest>../Glimpse.manifest</ApplicationManifest>
+    <ApplicationIcon>../Glimpse.ico</ApplicationIcon>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <WarningLevel>4</WarningLevel>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Glimpse.cs" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="Accessibility" />
+    <!-- reference assemblies, so the build needs no .NET Framework developer pack (and works on Linux) -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="all" Condition="'$(TargetFramework)' == 'net472'" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net481" Version="1.0.3" PrivateAssets="all" Condition="'$(TargetFramework)' == 'net481'" />
+  </ItemGroup>
+</Project>
