@@ -1770,8 +1770,9 @@ SettingsWindow::SettingsWindow(GlimpseApp* app, const Settings& s, int dpi) : im
                            app ? x : -20000, app ? y : -20000, p.S(kWidth100), p.S(600), nullptr, nullptr, Ui::Instance(), &p);
     p.hwnd = hwnd;
     if (!hwnd) throw std::runtime_error("cannot create the settings window (error " + std::to_string(GetLastError()) + ")");
-    HICON big = (HICON)LoadImageW(Ui::Instance(), MAKEINTRESOURCEW(IDI_GLIMPSE), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
-    HICON smallIcon = (HICON)LoadImageW(Ui::Instance(), MAKEINTRESOURCEW(IDI_GLIMPSE), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
+    // These resource icons are shared by every settings window and live with the module.
+    HICON big = (HICON)LoadImageW(Ui::Instance(), MAKEINTRESOURCEW(IDI_GLIMPSE), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED);
+    HICON smallIcon = (HICON)LoadImageW(Ui::Instance(), MAKEINTRESOURCEW(IDI_GLIMPSE), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED);
     if (big) SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)big);
     if (smallIcon) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)smallIcon);
     p.Build();

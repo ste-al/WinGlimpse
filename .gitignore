@@ -11,3 +11,5 @@
 /previews/
 /e2e/
 /e2e-out/
+# Python package validation
+__pycache__/

@@ -254,7 +254,7 @@ function CrashDetail {
 }
 
 $started = Get-Date
-$glimpse = Start-Process -FilePath $Exe -ArgumentList "/ini:$ini" -PassThru
+$glimpse = Start-Process -FilePath $Exe -ArgumentList "`"/ini:$ini`"" -PassThru
 Start-Sleep -Seconds 4
 Check (-not $glimpse.HasExited) 'Glimpse starts and keeps running' ''
 

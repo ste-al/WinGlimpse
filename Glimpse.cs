@@ -97,7 +97,12 @@ namespace Glimpse
             if (Opts.DumpIni != null)
             {
                 ConsoleOut.Attach();
-                File.WriteAllText(Opts.DumpIni, Settings.DefaultIniText, new UTF8Encoding(true));
+                try { File.WriteAllText(Opts.DumpIni, Settings.DefaultIniText, new UTF8Encoding(true)); }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("cannot write " + Opts.DumpIni + ": " + ex.Message);
+                    return 1;
+                }
                 Console.WriteLine("wrote " + Opts.DumpIni);
                 return 0;
             }
@@ -760,24 +765,27 @@ namespace Glimpse
             return s.Length <= max ? s : s.Substring(0, Math.Max(0, max - 1)) + "\u2026";
         }
 
-        /// <summary>Writes a file so that it is either the old or the new content, never half of it:
-        /// a temporary file next to it replaces it. Falls back to writing in place when the folder
-        /// does not allow new files (a file made writable for users in a read-only folder).</summary>
+        /// <summary>Writes a uniquely owned sibling first, then replaces the file atomically.
+        /// If replacement fails, the original remains intact and the caller receives the error.</summary>
         public static void WriteAtomic(string path, byte[] data)
         {
-            string tmp = path + ".tmp";
+            string tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            bool created = false;
             try
             {
-                File.WriteAllBytes(tmp, data);
+                using (var stream = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    created = true;
+                    stream.Write(data, 0, data.Length);
+                    stream.Flush(true);
+                }
                 if (File.Exists(path)) File.Replace(tmp, path, null, true);
                 else File.Move(tmp, path);
-                return;
             }
-            catch (Exception)
+            finally
             {
-                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                if (created) { try { File.Delete(tmp); } catch { } }
             }
-            File.WriteAllBytes(path, data);
         }
     }
 
@@ -1527,13 +1535,15 @@ namespace Glimpse
         bool ReadNow(bool first)
         {
             byte[] data = null;
+            DateTime readWrite = DateTime.MinValue;
+            long readLength = -1;
             try
             {
                 var fi = new FileInfo(FilePath);
                 if (fi.Exists)
                 {
-                    lastWrite = fi.LastWriteTimeUtc;
-                    lastLength = fi.Length;
+                    readWrite = fi.LastWriteTimeUtc;
+                    readLength = fi.Length;
                     using (var fs = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                     {
                         data = new byte[fs.Length];
@@ -1541,13 +1551,14 @@ namespace Glimpse
                         while (read < data.Length)
                         {
                             int n = fs.Read(data, read, data.Length - read);
-                            if (n <= 0) break;
+                            if (n <= 0) throw new EndOfStreamException("Settings file changed while reading");
                             read += n;
                         }
                     }
                 }
+                else LoadProblem = "not found";
             }
-            catch (Exception ex) { LoadProblem = ex.Message; }
+            catch (Exception ex) { data = null; LoadProblem = ex.Message; }
 
             if (data == null)
             {
@@ -1561,13 +1572,19 @@ namespace Glimpse
                 return true;
             }
             string hash = Hash(data);
-            if (!first && hash == lastHash) return false;
+            // Only acknowledge the file stamp after a complete read. A temporarily locked
+            // file must be retried even when the editor does not touch it again.
+            lastWrite = readWrite;
+            lastLength = readLength;
+            bool writable = CheckWritable();
+            bool stateChanged = UsingDefaults || LoadProblem != null || Writable != writable;
+            UsingDefaults = false;
+            LoadProblem = null;
+            Writable = writable;
+            if (!first && hash == lastHash) return stateChanged;
             lastHash = hash;
             ini = IniFile.Parse(data);
             Current = Settings.FromIni(ini);
-            UsingDefaults = false;
-            LoadProblem = null;
-            Writable = CheckWritable();
             foreach (string p in Current.Problems) Log.Warn("Glimpse.ini: " + p);
             return true;
         }
@@ -1594,9 +1611,11 @@ namespace Glimpse
             if (!Writable) return false;
             try
             {
-                s.WriteTo(ini);
-                byte[] data = ini.ToBytes();
+                var candidate = IniFile.Parse(ini.ToBytes());
+                s.WriteTo(candidate);
+                byte[] data = candidate.ToBytes();
                 Util.WriteAtomic(FilePath, data);
+                ini = candidate;
                 lastHash = Hash(data);
                 var fi = new FileInfo(FilePath);
                 lastWrite = fi.LastWriteTimeUtc;
@@ -1607,6 +1626,7 @@ namespace Glimpse
             catch (Exception ex)
             {
                 Log.Warn("cannot write " + FilePath + ": " + ex.Message);
+                LoadProblem = ex.Message;
                 Writable = false;
                 return false;
             }
@@ -1645,7 +1665,17 @@ namespace Glimpse
             try
             {
                 var fi = new FileInfo(FilePath);
-                if (fi.Exists && fi.LastWriteTimeUtc == lastWrite && fi.Length == lastLength && !UsingDefaults) return;
+                if (fi.Exists && fi.LastWriteTimeUtc == lastWrite && fi.Length == lastLength && !UsingDefaults && LoadProblem == null)
+                {
+                    bool writable = CheckWritable();
+                    if (Writable != writable)
+                    {
+                        Writable = writable;
+                        var changed = Changed;
+                        if (changed != null) changed(this, EventArgs.Empty);
+                    }
+                    return;
+                }
                 if (!fi.Exists && UsingDefaults) return;
             }
             catch { return; }
@@ -2149,7 +2179,12 @@ namespace Glimpse
         public static int DumpBuiltIn(string file)
         {
             string text = Regex.Replace(BuiltInEnglish, @"\\u([0-9a-fA-F]{4})", delegate(Match m) { return ((char)int.Parse(m.Groups[1].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture)).ToString(); });
-            File.WriteAllText(file, text.Replace("\r\n", "\n").Replace("\n", "\r\n"), new UTF8Encoding(false));
+            try { File.WriteAllText(file, text.Replace("\r\n", "\n").Replace("\n", "\r\n"), new UTF8Encoding(false)); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("cannot write " + file + ": " + ex.Message);
+                return 1;
+            }
             Console.WriteLine("wrote " + file);
             return 0;
         }
@@ -3311,6 +3346,109 @@ settings.done = Done
             Eq("Order ## \u2014 ERP", Util.TitleShape("Order #4711 \u2014 ERP"), "size memory: title shape");
             Eq(75, Geometry.GlimpsePx(50, 144), "glimpse: 50 px at 150% is 75 px");
             Eq(300, Util.Scale(200, 144), "minimum size: 200 px at 150% is 300 px");
+
+            // File-sharing locks and WinForms timers use Windows semantics; the pure
+            // geometry and configuration tests above also run under Mono on Linux.
+            if (Native.IsWindows) { SettingsStoreTests(); XRayTests(); }
+        }
+
+        static void SettingsStoreTests()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "Glimpse-selftest-" + Guid.NewGuid().ToString("N"));
+            string file = Path.Combine(dir, "Glimpse.ini");
+            Directory.CreateDirectory(dir);
+            try
+            {
+                File.WriteAllText(file, "[Glimpse]\r\nMode=Guide\r\n");
+                using (var store = new SettingsStore())
+                {
+                    store.Load(file);
+                    Eq(FixMode.Guide, store.Current.Mode, "settings reload: initial file");
+                    File.WriteAllText(file, "[Glimpse]\r\nMode=Strict\r\n");
+                    using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                    {
+                        store.Poll();
+                        Eq(FixMode.Guide, store.Current.Mode, "settings reload: locked file keeps last good settings");
+                    }
+                    store.Poll();
+                    Eq(FixMode.Strict, store.Current.Mode, "settings reload: retries after lock released without another edit");
+                    Eq(null, store.LoadProblem, "settings reload: clears transient error after recovery");
+
+                    var candidate = store.Current.Clone();
+                    candidate.Mode = FixMode.Guide;
+                    using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                        Check(!store.Save(candidate), "settings save: locked file reports failure", null);
+                    Eq(FixMode.Strict, store.Current.Mode, "settings save: failure keeps current settings");
+                    store.Poll();
+                    Check(store.Writable && store.LoadProblem == null, "settings save: unchanged file recovers after lock released", store.LoadProblem);
+                    Eq(FixMode.Strict, store.Current.Mode, "settings save: failed candidate stays unapplied");
+
+                    byte[] original = File.ReadAllBytes(file);
+                    // A reader that permits writes but denies deletion prevents atomic replace.
+                    // Falling back to an in-place write here would silently overwrite the file.
+                    using (new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                        Check(!store.Save(candidate), "settings save: replacement failure is reported", null);
+                    Eq(Convert.ToBase64String(original), Convert.ToBase64String(File.ReadAllBytes(file)), "settings save: replacement failure preserves original bytes");
+                    store.Poll();
+                    File.WriteAllText(file + ".tmp", "another writer's temporary file");
+                    Check(store.Save(candidate), "settings save: unique temporary file succeeds", null);
+                    Eq("another writer's temporary file", File.ReadAllText(file + ".tmp"), "settings save: leaves another writer's temporary file untouched");
+                    Eq(2, Directory.GetFiles(dir).Length, "settings save: cleans up its own temporary files");
+
+                    if (Native.IsWindows)
+                    {
+                        int changed = 0;
+                        store.Changed += delegate { changed++; };
+                        File.SetAttributes(file, FileAttributes.ReadOnly);
+                        store.Poll();
+                        Check(!store.Writable, "settings reload: detects read-only attribute without a content edit", null);
+                        File.SetAttributes(file, FileAttributes.Normal);
+                        store.Poll();
+                        Check(store.Writable && changed == 2, "settings reload: notifies when writability returns", Util.Inv(changed));
+                    }
+                }
+            }
+            finally
+            {
+                if (File.Exists(file)) File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(dir, true);
+            }
+        }
+
+        static void XRayTests()
+        {
+            XRayInputTest(null, "1x", "x-ray: a number followed by text becomes a search");
+            XRayInputTest(Keys.Back, "2x", "x-ray: Back cancels a pending number shortcut");
+            XRayInputTest(Keys.Down, "2x", "x-ray: navigation cancels a pending number shortcut");
+
+            var entry = new XRayEntry { Title = "Window", Number = 1, Frame = new Rc(10, 10, 350, 250), W = new TrackedWindow { Dpi = 96 } };
+            var entries = new List<XRayEntry> { entry };
+            using (var bitmap = new Bitmap(600, 400))
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                var monitor = new MonitorInfo { Bounds = new Rc(0, 0, 600, 400), Work = new Rc(0, 0, 600, 400), Dpi = 96 };
+                XRayView.PaintScene(graphics, monitor, false, entries, "", -1, -1);
+                Rc label = entry.Label;
+                monitor.Dpi = 144;
+                XRayView.PaintScene(graphics, monitor, false, entries, "", -1, -1);
+                Check(entry.Label.Same(label), "x-ray: mixed-DPI surfaces keep identical label hit bounds", entry.Label.ToString());
+            }
+        }
+
+        static void XRayInputTest(Keys? cancel, string expected, string name)
+        {
+            using (var view = new XRayView(null))
+            {
+                for (int i = 0; i < 12; i++) view.Entries.Add(new XRayEntry { Title = "Window " + i, Number = i + 1 });
+                try
+                {
+                    view.OnChar('1');
+                    if (cancel.HasValue) { view.OnKey(cancel.Value, false); view.OnChar('2'); }
+                    view.OnChar('x');
+                    Eq(expected, view.Query, name);
+                }
+                catch (Exception ex) { Check(false, name, ex.ToString()); }
+            }
         }
 
         static byte[] Concat(byte[] a, byte[] b)
@@ -6588,7 +6726,7 @@ settings.done = Done
 
         public void Close()
         {
-            digitTimer.Stop();
+            CancelNumber();
             // detach the surfaces first: destroying the active one sends WM_ACTIVATE into the view right away,
             // and X-ray must already be closed then
             var closing = surfaces.ToArray();
@@ -6629,6 +6767,13 @@ settings.done = Done
 
         public void OnKey(Keys key, bool shift)
         {
+            switch (key)
+            {
+                case Keys.Escape: case Keys.Enter: case Keys.Back:
+                case Keys.Down: case Keys.Right: case Keys.Tab: case Keys.Up: case Keys.Left:
+                    CancelNumber();
+                    break;
+            }
             var m = MatchList();
             switch (key)
             {
@@ -6669,6 +6814,10 @@ settings.done = Done
                 else { digitTimer.Stop(); digitTimer.Start(); }
                 return;
             }
+            // A number followed by text belongs to the search (for example 1Password).
+            // Its pending shortcut must not activate a window after typing continues.
+            Query += digits;
+            CancelNumber();
             Query += c;
             SelectFirstMatch();
             RenderAll();
@@ -6682,6 +6831,12 @@ settings.done = Done
             digits = "";
             if (!int.TryParse(d, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)) return;
             foreach (var e in Entries) if (e.Number == n) { Activate(e, Native.KeyDown(Native.VK_SHIFT)); return; }
+        }
+
+        void CancelNumber()
+        {
+            digitTimer.Stop();
+            digits = "";
         }
 
         void SelectFirstMatch()
@@ -6776,7 +6931,10 @@ settings.done = Done
                         Draw.Stroke(g, RectangleF.Inflate(r, 3 * k, 3 * k), 10 * k, Color.FromArgb(120, 124, 108, 242), 6 * k, false);
                         Draw.Stroke(g, r, 8 * k, Color.FromArgb(160, 150, 255), 3 * k, false);
                     }
-                    e.Label = LabelAt(g, e, e.Frame.L + (int)(18 * k), e.Frame.T + (int)(16 * k), k, sel, hit ? 255 : 90);
+                    // Every monitor paints these labels, so their physical bounds must
+                    // depend on the window DPI rather than whichever surface paints last.
+                    float labelK = e.W != null && e.W.Dpi > 0 ? e.W.Dpi / 96f : k;
+                    e.Label = LabelAt(g, e, e.Frame.L + (int)(18 * labelK), e.Frame.T + (int)(16 * labelK), labelK, sel, hit ? 255 : 90);
                 }
             if (!isMain) return;
 
@@ -9115,7 +9273,10 @@ settings.done = Done
         static Bitmap Snapshot(Control c)
         {
             c.Location = new Point(-20000, -20000);
-            if (c is ToolStripDropDown) ((ToolStripDropDown)c).Show(new Point(-20000, -20000));
+            // Drawing a menu needs its handle and layout, not a live popup. Opening it
+            // installs auto-close message filters whose teardown can outlive these
+            // short-lived preview controls and fail during WinForms shutdown.
+            if (c is ToolStripDropDown) c.CreateControl();
             else c.Show();
             Application.DoEvents();
             c.PerformLayout();

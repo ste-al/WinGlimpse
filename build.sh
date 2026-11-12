@@ -10,7 +10,7 @@
 #   * dist/: one zip per build, SHA256SUMS.txt, BUILDINFO.txt
 #
 # Usage: ./build.sh [--no-dist] [--no-previews] [--no-native] [--check-dist]
-#   --check-dist   only verify that dist/ was built from the current sources
+#   --check-dist   verify source manifest, package contents, and distribution checksums
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 cd "$here"
@@ -26,29 +26,8 @@ for a in "$@"; do
   esac
 done
 
-version=$(sed -n 's/^ *public const string Version = "\([0-9.]*\)";.*/\1/p' Glimpse.cs)
-[ -n "$version" ] || { echo "cannot read the version from Glimpse.cs" >&2; exit 1; }
-
-# Files every package is built from; their hashes go into dist/BUILDINFO.txt.
-sources=(Glimpse.cs Glimpse.ps1 Glimpse.manifest Glimpse.ico Glimpse.ini build.cmd build/Glimpse.csproj LICENSE docs/README-dist.txt
-         build-native.sh build-native.cmd tools/build-mingw-toolchain.sh)
-while IFS= read -r f; do sources+=("$f"); done < <(ls lang/*.txt deploy/*.cmd src/* 2>/dev/null | LC_ALL=C sort)
-
-buildinfo() {
-  echo "Glimpse $version"
-  echo "Built by build.sh from these sources (sha256):"
-  for f in "${sources[@]}"; do
-    [ -f "$f" ] && printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$f"
-  done
-}
-
 if [ "$check_only" = 1 ]; then
-  if diff <(buildinfo) dist/BUILDINFO.txt >/dev/null 2>&1; then
-    echo "dist/ matches the sources"; exit 0
-  fi
-  echo "dist/ is stale: run ./build.sh and commit dist/" >&2
-  diff <(buildinfo) dist/BUILDINFO.txt >&2 || true
-  exit 1
+  exec python3 tools/package.py --check
 fi
 
 # The compiler that ships with Windows reads BOM-less files in the ANSI code page: keep them ASCII.
@@ -142,50 +121,5 @@ fi
 [ "$native" = 1 ] || { echo "dist/ needs the native build (drop --no-native)" >&2; exit 1; }
 
 echo "== dist"
-rm -rf dist
-mkdir -p dist
-python3 - "$version" "$out" <<'PY'
-import os, sys, zipfile, hashlib
-version, out = sys.argv[1], sys.argv[2]
-stamp = (2026, 1, 1, 0, 0, 0)          # fixed, so the same sources give the same zips
-
-def add(z, src, arc):
-    with open(src, 'rb') as f:
-        data = f.read()
-    info = zipfile.ZipInfo('Glimpse/' + arc, stamp)
-    info.compress_type = zipfile.ZIP_DEFLATED
-    info.external_attr = 0o644 << 16
-    z.writestr(info, data)
-
-langs = sorted(f for f in os.listdir('lang') if f.endswith('.txt'))
-common = [('Glimpse.ini', 'Glimpse.ini'), ('LICENSE', 'LICENSE.txt'), ('docs/README-dist.txt', 'README.txt')] + \
-         [('lang/' + f, 'lang/' + f) for f in langs]
-
-packages = {
-    'Glimpse-%s-win-x64.zip' % version: [(out + '/x64/Glimpse.exe', 'Glimpse.exe'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
-    'Glimpse-%s-win-arm64.zip' % version: [(out + '/arm64/Glimpse.exe', 'Glimpse.exe'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
-    'Glimpse-%s-native-win-x64.zip' % version: [(out + '/native-x64/Glimpse.exe', 'Glimpse.exe'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
-    'Glimpse-%s-native-win-arm64.zip' % version: [(out + '/native-arm64/Glimpse.exe', 'Glimpse.exe'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
-    'Glimpse-%s-ps1.zip' % version: [('Glimpse.ps1', 'Glimpse.ps1'), ('Glimpse.cs', 'Glimpse.cs'),
-                                    ('build.cmd', 'build.cmd'), ('Glimpse.manifest', 'Glimpse.manifest'), ('Glimpse.ico', 'Glimpse.ico'),
-                                    ('deploy/Start-Glimpse-ps1.cmd', 'deploy/Start-Glimpse-ps1.cmd'), ('deploy/Start-Glimpse.cmd', 'deploy/Start-Glimpse.cmd')],
-}
-sums = []
-for name, files in packages.items():
-    path = os.path.join('dist', name)
-    with zipfile.ZipFile(path, 'w') as z:
-        for src, arc in sorted(files + common, key=lambda t: t[1]):
-            if os.path.exists(src):
-                add(z, src, arc)
-            else:
-                print('warning: missing ' + src, file=sys.stderr)
-    sums.append((name, path))
-for label, path in [('win-x64/Glimpse.exe', out + '/x64/Glimpse.exe'), ('win-arm64/Glimpse.exe', out + '/arm64/Glimpse.exe'),
-                    ('native-win-x64/Glimpse.exe', out + '/native-x64/Glimpse.exe'), ('native-win-arm64/Glimpse.exe', out + '/native-arm64/Glimpse.exe')]:
-    sums.append((label, path))
-with open('dist/SHA256SUMS.txt', 'w', newline='\n') as f:
-    for label, path in sorted(sums):
-        f.write('%s  %s\n' % (hashlib.sha256(open(path, 'rb').read()).hexdigest(), label))
-PY
-buildinfo > dist/BUILDINFO.txt
+python3 tools/package.py --out "$out"
 ls -la dist

@@ -1,0 +1,9 @@
+# Source hashes and reproducible packages must use the same bytes on Windows and Linux.
+* text=auto eol=lf
+# Preserve the intentional CRLF bytes in Windows scripts, defaults, and packaged text files.
+*.cmd -text
+*.ini -text
+*.txt -text
+*.ico binary
+*.png binary
+*.zip binary

@@ -1,6 +1,6 @@
 // Glimpse native build: /selftest (unit tests and the shared geometry cases) and /checklang.
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "glimpse.h"
+#include "app.h"
 
 namespace glimpse {
 
@@ -88,7 +88,162 @@ void CheckEnglishFile() {
     ConsoleOut::Line(L"# lang\\en.txt not found next to the program; skipped");
 }
 
+void RunAtomicSaveTests() {
+    wchar_t folder[MAX_PATH], name[MAX_PATH];
+    DWORD n = GetTempPathW(MAX_PATH, folder);
+    bool haveTemp = n > 0 && n < MAX_PATH && GetTempFileNameW(folder, L"gla", 0, name) != 0;
+    Check(haveTemp, L"atomic save: create temporary target", L"");
+    if (!haveTemp) return;
+    wstr file(name), other = file + L".tmp";
+    struct Cleanup {
+        wstr file, other;
+        ~Cleanup() { DeleteFileW(file.c_str()); DeleteFileW(other.c_str()); }
+    } cleanup { file, other };
+    const std::string original = "original settings\r\n", sentinel = "another writer's temporary file";
+    Check(Util::WriteFileBytes(file, original) && Util::WriteFileBytes(other, sentinel), L"atomic save: prepare original and unrelated temporary file", L"");
+    // Permit ordinary writes, but deny delete/replace: the old in-place fallback would corrupt it.
+    HANDLE lock = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    Check(lock != INVALID_HANDLE_VALUE, L"atomic save: lock replacement of target", L"");
+    if (lock != INVALID_HANDLE_VALUE) {
+        Check(!Util::WriteFileAtomic(file, "replacement"), L"atomic save: denied replacement reports failure", L"");
+        std::string actual;
+        Check(Util::ReadFileBytes(file, actual) && actual == original, L"atomic save: denied replacement preserves original bytes", L"");
+        CloseHandle(lock);
+    }
+    std::string actual;
+    Check(Util::ReadFileBytes(other, actual) && actual == sentinel, L"atomic save: leaves unrelated .tmp file untouched", L"");
+    WIN32_FIND_DATAW fd;
+    HANDLE found = FindFirstFileW((file + L".tmp.*").c_str(), &fd);
+    std::vector<wstr> leftovers;
+    if (found != INVALID_HANDLE_VALUE) {
+        // Win32's wildcard also matches the unrelated <file>.tmp; check the actual prefix.
+        wstr prefix = Util::FileName(file) + L".tmp.";
+        do { if (Util::StartsWithI(fd.cFileName, prefix)) leftovers.push_back(fd.cFileName); } while (FindNextFileW(found, &fd));
+        FindClose(found);
+    }
+    Check(leftovers.empty(), L"atomic save: removes its temporary file after failure", Join(leftovers, L", "));
+    Check(Util::WriteFileAtomic(file, "replacement"), L"atomic save: replaces unlocked target", L"");
+    Check(Util::ReadFileBytes(file, actual) && actual == "replacement", L"atomic save: successful replacement stores complete bytes", L"");
+    Check(Util::ReadFileBytes(other, actual) && actual == sentinel, L"atomic save: successful save also leaves unrelated .tmp untouched", L"");
+}
+
+void RunSettingsStoreTests() {
+    wchar_t folder[MAX_PATH], name[MAX_PATH];
+    DWORD n = GetTempPathW(MAX_PATH, folder);
+    bool haveTemp = n > 0 && n < MAX_PATH && GetTempFileNameW(folder, L"glp", 0, name) != 0;
+    Check(haveTemp, L"settings store: create temporary INI", L"");
+    if (!haveTemp) return;
+    wstr file(name);
+    struct Cleanup {
+        wstr file;
+        ~Cleanup() { SetFileAttributesW(file.c_str(), FILE_ATTRIBUTE_NORMAL); DeleteFileW(file.c_str()); }
+    } cleanup { file };
+    Check(Util::WriteFileBytes(file, "[Glimpse]\r\nMode=Guide\r\n"), L"settings store: write initial INI", L"");
+    SettingsStore store;
+    store.Load(file);
+    Eq(L"Guide", ModeName(store.current.mode), L"settings store: load initial settings");
+    int notifications = 0;
+    store.changed = [&]() { notifications++; };
+    Check(Util::WriteFileBytes(file, "[Glimpse]\r\nMode=Strict\r\n"), L"settings store: write changed INI", L"");
+    HANDLE lock = CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    Check(lock != INVALID_HANDLE_VALUE, L"settings store: temporarily lock changed INI", L"");
+    if (lock != INVALID_HANDLE_VALUE) {
+        store.Poll();
+        Eq(L"Guide", ModeName(store.current.mode), L"settings store: failed reload retains last good settings");
+        Eq(0, notifications, L"settings store: failed reload does not notify");
+        CloseHandle(lock);
+        store.Poll();
+        Eq(L"Strict", ModeName(store.current.mode), L"settings store: retries unchanged stamp after read lock is released");
+        Eq(1, notifications, L"settings store: recovered reload notifies once");
+    }
+    Check(SetFileAttributesW(file.c_str(), FILE_ATTRIBUTE_READONLY) != FALSE, L"settings store: make INI read-only", L"");
+    store.Poll();
+    Check(!store.writable, L"settings store: detects read-only attribute without content change", L"");
+    Check(SetFileAttributesW(file.c_str(), FILE_ATTRIBUTE_NORMAL) != FALSE, L"settings store: make INI writable again", L"");
+    store.Poll();
+    Check(store.writable, L"settings store: recovers writable state without content change", L"");
+    Settings edited = store.current.Clone();
+    edited.mode = FixMode::Assist;
+    Check(store.Save(edited), L"settings store: save succeeds after access recovers", L"");
+    Eq(L"Assist", ModeName(store.current.mode), L"settings store: successful save updates current settings");
+}
+
+void RunXRayTests() {
+    XRayView view(nullptr);
+    view.entries.resize(10);   // number shortcuts wait for a second digit
+    view.OnChar(L'1');
+    view.OnChar(L'x');
+    Eq(L"1x", view.query, L"x-ray: numeric prefix becomes a text search");
+    view.query.clear();
+    view.OnChar(L'1');
+    view.OnKey(VK_BACK, false);
+    view.OnChar(L'x');
+    Eq(L"x", view.query, L"x-ray: Backspace cancels a pending number");
+    view.query.clear();
+    view.OnChar(L'1');
+    view.OnKey(VK_DOWN, false);
+    view.OnChar(L'x');
+    Eq(L"x", view.query, L"x-ray: navigation cancels a pending number");
+    view.query.clear();
+    view.OnChar(L'1');
+    view.Close();
+    view.OnChar(L'x');
+    Eq(L"x", view.query, L"x-ray: closing cancels a pending number");
+
+    Ui::StartGdiplus();
+    {
+        // AND/XOR masks: one opaque white, one opaque black, two transparent pixels.
+        const BYTE monoBits[] = { 0x40, 0, 0x40, 0, 0x80, 0, 0, 0 };
+        HBITMAP mask = CreateBitmap(2, 4, 1, 1, monoBits);
+        ICONINFO ii = {};
+        ii.fIcon = TRUE;
+        ii.hbmMask = mask;
+        HICON icon = mask ? CreateIconIndirect(&ii) : nullptr;
+        Check(icon != nullptr, L"icons: create monochrome fixture", L"");
+        if (icon) {
+            BitmapPtr converted = Draw::IconBitmap(icon, 2);
+            Check(converted != nullptr, L"icons: convert monochrome fixture", L"");
+            if (converted) {
+                int white = 0, black = 0, transparent = 0;
+                for (int y = 0; y < 2; y++)
+                    for (int x = 0; x < 2; x++) {
+                        Color pixel;
+                        converted->GetPixel(x, y, &pixel);
+                        if (pixel.GetA() == 0) transparent++;
+                        else if (pixel.GetValue() == 0xFFFFFFFFu) white++;
+                        else if (pixel.GetValue() == 0xFF000000u) black++;
+                    }
+                Eq(1, white, L"icons: monochrome white detail stays opaque");
+                Eq(1, black, L"icons: monochrome black detail stays opaque");
+                Eq(2, transparent, L"icons: monochrome transparent pixels stay transparent");
+            }
+            DestroyIcon(icon);
+        }
+        if (mask) DeleteObject(mask);
+
+        Gdiplus::Bitmap bmp(16, 16, PixelFormat32bppPARGB);
+        Graphics g(&bmp);
+        MonitorInfo low, high;
+        low.bounds = low.work = Rc(0, 0, 1920, 1080);
+        high.bounds = high.work = Rc(1920, 0, 3840, 1080);
+        high.dpi = 192;
+        std::vector<XRayEntry> entries(1);
+        entries[0].w = std::make_shared<TrackedWindow>();
+        entries[0].w->dpi = 96;
+        entries[0].frame = Rc(100, 100, 500, 500);
+        entries[0].title = L"Example window";
+        XRayView::PaintScene(g, low, false, entries, L"", -1, -1);
+        Rc label = entries[0].label;
+        Check(!label.IsEmpty(), L"x-ray: label has a click target", L"");
+        XRayView::PaintScene(g, high, false, entries, L"", -1, -1);
+        Check(label.Same(entries[0].label), L"x-ray: other monitor DPI preserves label click target", entries[0].label.ToString());
+    }
+    Ui::StopGdiplus();
+}
+
 void UnitTests() {
+    RunAtomicSaveTests();
+    RunSettingsStoreTests();
     // intervals
     IntervalSet s = IntervalSet::Of(0, 100);
     s.Subtract(10, 20);
@@ -230,6 +385,8 @@ void UnitTests() {
     Check(o.iniArgument == L"C:\\x y\\G.ini" && o.showSettings, L"options: -Ini path /settings", L"");
     Check(!Options::Parse({ L"/bogus" }).error.empty(), L"options: unknown option", L"");
     Check(Options::Parse({ L"/background" }).background, L"options: /background", L"");
+
+    RunXRayTests();
 
     // misc
     Eq(L"Order ## \u2014 ERP", Util::TitleShape(L"Order #4711 \u2014 ERP"), L"size memory: title shape");

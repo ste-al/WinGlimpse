@@ -153,6 +153,11 @@ Title patterns are ECMAScript-style regular expressions and ignore case. An inva
 only its own rule; it is logged and the tray shows a warning. The file may be UTF-8 (with or without
 BOM) or UTF-16; comments start with `;` or `#` and survive saves.
 
+Saves create a temporary file beside `Glimpse.ini`, then replace the original. The folder must allow
+creating files as well as updating the INI. If another program prevents replacement, the save fails
+and the original stays intact. Glimpse retries a temporarily locked settings file after it is released;
+no further edit is needed.
+
 ### Command line
 
 | EXE | PowerShell | |
@@ -247,8 +252,13 @@ and both builds must pass the same [geometry cases](tests/geometry-cases.txt).
 - **Native, on Linux:** [`tools/build-mingw-toolchain.sh`](tools/build-mingw-toolchain.sh) builds a
   clang/mingw-w64 cross toolchain for x64 and ARM64 from the Ubuntu sources (LLVM 18, mingw-w64 12,
   libc++ linked statically), then `./build-native.sh --test` builds both EXEs and runs the self-test
-  under Wine. The build is reproducible: the same sources give byte-identical EXEs. `./build.sh` runs
+  under Wine. The same sources and toolchain give byte-identical EXEs. `./build.sh` runs
   it too and adds the native packages to `dist/`.
+- **Package existing builds:** `python tools/package.py` (Python 3.10+) assembles the four EXEs in
+  `out/` and the PowerShell source into `dist/`. Missing inputs fail before existing packages change.
+  `python tools/package.py --check` verifies the source manifest, all expected archives, their
+  checksums, and every packaged file without needing `out/`. `./build.sh --check-dist` runs the
+  same check. Source line endings are fixed by `.gitattributes` so checksums agree across hosts.
 - **CI** ([`.github/workflows/build.yml`](.github/workflows/build.yml)) checks that `dist/` matches
   the sources, builds on Linux, then on Windows Server 2022, Windows Server 2025 and Windows 11 ARM64:
   builds with the in-box `csc.exe`, runs the self-test of the in-box EXE, the x64/ARM64 EXE and the
