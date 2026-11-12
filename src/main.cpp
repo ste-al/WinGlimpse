@@ -62,7 +62,10 @@ static int Run(const std::vector<wstr>& args) {
     if (!o.dumpLang.empty()) { ConsoleOut::Attach(); return Texts::DumpBuiltIn(o.dumpLang); }
     if (!o.dumpIni.empty()) {
         ConsoleOut::Attach();
-        Util::WriteFileBytes(o.dumpIni, "\xEF\xBB\xBF" + Util::Narrow(Settings::DefaultIniText()));
+        if (!Util::WriteFileBytes(o.dumpIni, "\xEF\xBB\xBF" + Util::Narrow(Settings::DefaultIniText()))) {
+            ConsoleOut::Line(L"cannot write " + o.dumpIni);
+            return 1;
+        }
         ConsoleOut::Line(L"wrote " + o.dumpIni);
         return 0;
     }

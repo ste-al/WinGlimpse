@@ -3,6 +3,7 @@
 #include "glimpse.h"
 #include "resource.h"
 #include <wincrypt.h>
+#include <objbase.h>
 #include <cstdio>
 
 namespace glimpse {
@@ -193,17 +194,25 @@ bool WriteFileBytes(const wstr& p, const std::string& data) {
     return ok;
 }
 
-// A temporary file next to it replaces the file, so it is either the old or the new content. Falls back
-// to writing in place when the folder does not allow new files (a file made writable in a read-only folder).
+// Write a uniquely owned sibling first, then replace atomically. If replacement is denied,
+// preserve the original rather than falling back to truncating it in place.
 bool WriteFileAtomic(const wstr& p, const std::string& data) {
-    wstr tmp = p + L".tmp";
-    if (WriteFileBytes(tmp, data)) {
-        bool exists = FileExists(p);
-        if (exists && ReplaceFileW(p.c_str(), tmp.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr)) return true;
+    GUID id;
+    wchar_t suffix[40];
+    if (FAILED(CoCreateGuid(&id)) || StringFromGUID2(id, suffix, 40) == 0) return false;
+    wstr tmp = p + L".tmp." + suffix;
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    bool ok = data.size() <= MAXDWORD && (data.empty() || (WriteFile(h, data.data(), (DWORD)data.size(), &written, nullptr) && written == data.size()));
+    if (ok) ok = FlushFileBuffers(h) != FALSE;
+    CloseHandle(h);
+    if (ok) {
+        if (FileExists(p) && ReplaceFileW(p.c_str(), tmp.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr)) return true;
         if (MoveFileExW(tmp.c_str(), p.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
-        DeleteFileW(tmp.c_str());
     }
-    return WriteFileBytes(p, data);
+    DeleteFileW(tmp.c_str());
+    return false;
 }
 
 bool AppendFileBytes(const wstr& p, const std::string& data) {
@@ -930,15 +939,14 @@ bool SettingsStore::CheckWritable() {
 
 bool SettingsStore::ReadNow(bool first) {
     std::string data;
-    bool have = false;
-    unsigned long long t, size;
-    if (Util::FileStamp(filePath, t, size)) {
-        lastWrite = t;
-        lastSize = size;
+    unsigned long long t = 0, size = 0;
+    bool have = Util::FileStamp(filePath, t, size);
+    if (have) {
         have = Util::ReadFileBytes(filePath, data);
         if (!have) loadProblem = L"cannot read";
     } else loadProblem = L"not found";
     if (!have) {
+        // Keep the last good settings and retry even when the file's stamp does not change.
         if (!first && !usingDefaults) return false;
         ini = IniFile::FromText(Settings::DefaultIniText());
         current = Settings::Defaults();
@@ -948,26 +956,35 @@ bool SettingsStore::ReadNow(bool first) {
         return true;
     }
     std::string hash = Util::Sha1Hex(data);
-    if (!first && hash == lastHash) return false;
-    lastHash = hash;
-    ini = IniFile::Parse(data);
-    current = Settings::FromIni(ini);
+    bool canWrite = CheckWritable();
+    bool stateChanged = usingDefaults || !loadProblem.empty() || writable != canWrite;
+    // Cache metadata only after a complete read. A sharing violation must not hide a later retry.
+    lastWrite = t;
+    lastSize = size;
     usingDefaults = false;
     loadProblem.clear();
-    writable = CheckWritable();
+    writable = canWrite;
+    if (!first && hash == lastHash) return stateChanged;
+    IniFile nextIni = IniFile::Parse(data);
+    Settings next = Settings::FromIni(nextIni);
+    lastHash = hash;
+    ini = std::move(nextIni);
+    current = std::move(next);
     for (const wstr& p : current.problems) Log::Warn(L"Glimpse.ini: " + p);
     return true;
 }
 
 bool SettingsStore::Save(const Settings& s) {
     if (!writable) return false;
-    s.WriteTo(ini);
-    std::string data = ini.ToBytes();
+    IniFile next = ini;
+    s.WriteTo(next);
+    std::string data = next.ToBytes();
     if (!Util::WriteFileAtomic(filePath, data)) {
         Log::Warn(L"cannot write " + filePath);
         writable = false;
         return false;
     }
+    ini = std::move(next);
     lastHash = Util::Sha1Hex(data);
     Util::FileStamp(filePath, lastWrite, lastSize);
     current = Settings::FromIni(ini);
@@ -977,7 +994,15 @@ bool SettingsStore::Save(const Settings& s) {
 void SettingsStore::Poll() {
     unsigned long long t, size;
     bool exists = Util::FileStamp(filePath, t, size);
-    if (exists && t == lastWrite && size == lastSize && !usingDefaults) return;
+    if (exists && t == lastWrite && size == lastSize && !usingDefaults && loadProblem.empty()) {
+        // Attributes and access can change without changing file contents or its write time.
+        bool canWrite = CheckWritable();
+        if (writable != canWrite) {
+            writable = canWrite;
+            if (changed) changed();
+        }
+        return;
+    }
     if (!exists && usingDefaults) return;
     if (ReadNow(false)) {
         Log::Info(L"Glimpse.ini changed, settings reloaded");
@@ -1391,7 +1416,10 @@ std::map<wstr, wstr> Pseudo(const std::map<wstr, wstr>& src) {
 
 int DumpBuiltIn(const wstr& file) {
     wstr t = Util::Replace(Util::Replace(EnglishSource(), L"\r\n", L"\n"), L"\n", L"\r\n");
-    Util::WriteFileBytes(file, Util::Narrow(t));
+    if (!Util::WriteFileBytes(file, Util::Narrow(t))) {
+        ConsoleOut::Line(L"cannot write " + file);
+        return 1;
+    }
     ConsoleOut::Line(L"wrote " + file);
     return 0;
 }

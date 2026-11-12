@@ -479,6 +479,7 @@ public:
     static bool Matches(const wstr& title, const wstr& q);
 private:
     void Step(const std::vector<int>& m, int dir);
+    void CancelNumber();
     void PickNumber(bool timeout);
     void SelectFirstMatch();
     int HitTest(int x, int y) const;

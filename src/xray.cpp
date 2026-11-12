@@ -101,7 +101,7 @@ void XRayView::Show(bool fromKeyboard) {
 }
 
 void XRayView::Close() {
-    digitTimer.Stop();
+    CancelNumber();
     // detach the surfaces first: hiding the active one sends WM_ACTIVATE (and more) into the view right away,
     // and the view must already be closed then
     std::vector<std::unique_ptr<XRaySurface>> closing;
@@ -140,6 +140,12 @@ std::vector<int> XRayView::MatchList() const {
 void XRayView::OnKey(UINT vk, bool shift) {
     std::vector<int> m = MatchList();
     switch (vk) {
+        case VK_ESCAPE: case VK_RETURN: case VK_BACK:
+        case VK_DOWN: case VK_RIGHT: case VK_TAB: case VK_UP: case VK_LEFT:
+            CancelNumber();
+            break;
+    }
+    switch (vk) {
         case VK_ESCAPE: Close(); return;
         case VK_RETURN:
             if (selected >= 0 && selected < (int)entries.size() && (query.empty() || std::find(m.begin(), m.end(), selected) != m.end())) Activate(entries[selected], shift);
@@ -175,9 +181,18 @@ void XRayView::OnChar(wchar_t c) {
         else digitTimer.Start();
         return;
     }
+    // A quick digit prefix followed by text belongs to the search (e.g. "1Password").
+    // It must no longer trigger the delayed window-number shortcut.
+    query += digits;
+    CancelNumber();
     query += c;
     SelectFirstMatch();
     RenderAll();
+}
+
+void XRayView::CancelNumber() {
+    digitTimer.Stop();
+    digits.clear();
 }
 
 void XRayView::PickNumber(bool) {
@@ -294,7 +309,10 @@ void XRayView::PaintScene(Graphics& g, const MonitorInfo& mon, bool isMain, std:
                 Draw::Stroke(g, outer, 10 * k, Color(120, 124, 108, 242), 6 * k, false);
                 Draw::Stroke(g, r, 8 * k, Color(160, 150, 255), 3 * k, false);
             }
-            e.label = LabelAt(g, e, e.frame.L + (int)(18 * k), e.frame.T + (int)(16 * k), k, sel, hit ? 255 : 90);
+            // Every surface clips this same label. Use its window's DPI so painting a
+            // second monitor cannot change the first monitor's label or click target.
+            float labelK = e.w && e.w->dpi > 0 ? e.w->dpi / 96.0f : k;
+            e.label = LabelAt(g, e, e.frame.L + (int)(18 * labelK), e.frame.T + (int)(16 * labelK), labelK, sel, hit ? 255 : 90);
         }
     if (!isMain) return;
 

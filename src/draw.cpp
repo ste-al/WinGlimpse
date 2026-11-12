@@ -457,33 +457,49 @@ BitmapPtr IconBitmap(HICON icon, int size) {
         }
     }
     if (!result) {
-        // monochrome icon: let GDI draw it on white and on black and work out the alpha
-        auto* dst = new Bitmap(size, size, PixelFormat32bppARGB);
+        // Draw on both backgrounds: white pixels in the icon are opaque when they
+        // stay white on black, while transparent pixels follow the background.
         HDC screen = GetDC(nullptr);
-        HDC dc = CreateCompatibleDC(screen);
-        HBITMAP hb = CreateCompatibleBitmap(screen, size, size);
-        HGDIOBJ old = SelectObject(dc, hb);
-        RECT r = { 0, 0, size, size };
-        FillRect(dc, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
-        DrawIconEx(dc, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
-        SelectObject(dc, old);
-        std::vector<uint32_t> bits;
-        if (ReadBits(hb, size, size, bits)) {
-            BitmapData data;
-            Gdiplus::Rect all(0, 0, size, size);
-            if (dst->LockBits(&all, ImageLockModeWrite, PixelFormat32bppARGB, &data) == Ok) {
-                for (int y = 0; y < size; y++)
-                    for (int x = 0; x < size; x++) {
-                        uint32_t p = bits[(size_t)y * size + x] & 0xFFFFFF;
-                        ((uint32_t*)((BYTE*)data.Scan0 + (size_t)y * data.Stride))[x] = p == 0xFFFFFF ? 0 : (p | 0xFF000000u);
-                    }
-                dst->UnlockBits(&data);
+        HDC dc = screen ? CreateCompatibleDC(screen) : nullptr;
+        HBITMAP hb = dc ? CreateCompatibleBitmap(screen, size, size) : nullptr;
+        if (hb) {
+            HGDIOBJ old = SelectObject(dc, hb);
+            RECT r = { 0, 0, size, size };
+            FillRect(dc, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
+            DrawIconEx(dc, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
+            SelectObject(dc, old);
+            std::vector<uint32_t> white, black;
+            bool haveWhite = ReadBits(hb, size, size, white);
+            SelectObject(dc, hb);
+            FillRect(dc, &r, (HBRUSH)GetStockObject(BLACK_BRUSH));
+            DrawIconEx(dc, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
+            SelectObject(dc, old);
+            if (haveWhite && ReadBits(hb, size, size, black)) {
+                auto dst = std::make_shared<Bitmap>(size, size, PixelFormat32bppARGB);
+                BitmapData data;
+                Gdiplus::Rect all(0, 0, size, size);
+                if (dst->LockBits(&all, ImageLockModeWrite, PixelFormat32bppARGB, &data) == Ok) {
+                    for (int y = 0; y < size; y++)
+                        for (int x = 0; x < size; x++) {
+                            size_t i = (size_t)y * size + x;
+                            int delta = 0;
+                            for (int shift = 0; shift < 24; shift += 8)
+                                delta = std::max(delta, (int)((white[i] >> shift) & 255) - (int)((black[i] >> shift) & 255));
+                            int alpha = 255 - delta;
+                            uint32_t pixel = (uint32_t)alpha << 24;
+                            if (alpha > 0)
+                                for (int shift = 0; shift < 24; shift += 8)
+                                    pixel |= (uint32_t)std::min(255, (int)(((black[i] >> shift) & 255) * 255 + alpha / 2) / alpha) << shift;
+                            ((uint32_t*)((BYTE*)data.Scan0 + (size_t)y * data.Stride))[x] = pixel;
+                        }
+                    dst->UnlockBits(&data);
+                    result = dst;
+                }
             }
+            DeleteObject(hb);
         }
-        DeleteObject(hb);
-        DeleteDC(dc);
-        ReleaseDC(nullptr, screen);
-        result.reset(dst);
+        if (dc) DeleteDC(dc);
+        if (screen) ReleaseDC(nullptr, screen);
     }
     if (ii.hbmColor) DeleteObject(ii.hbmColor);
     if (ii.hbmMask) DeleteObject(ii.hbmMask);

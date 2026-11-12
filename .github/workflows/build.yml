@@ -22,7 +22,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq mono-complete xvfb > /dev/null
 
-      - name: dist/ was built from these sources
+      - name: Package integrity regression tests
+        run: python3 -m unittest discover -s tests -p test_package.py
+
+      - name: dist/ matches the sources and verified package contents
         run: ./build.sh --check-dist
 
       - name: Build x64 and ARM64 (C# 5), self-test, language check, previews
@@ -37,6 +40,7 @@ jobs:
             out/previews
             out/selftest.txt
             out/checklang.txt
+            out/sim/sim-cases.txt
           if-no-files-found: error
 
   windows:
@@ -121,6 +125,7 @@ jobs:
           foreach ($lang in 'en', 'de', 'cs', 'sk', 'qps') {
             $p = Start-Process .\Glimpse.exe -ArgumentList "/render:previews\$lang", "/renderlang:$lang" -Wait -PassThru -NoNewWindow -RedirectStandardOutput "render-$lang.txt"
             Get-Content "render-$lang.txt"
+            if ($p.ExitCode -ne 0) { exit $p.ExitCode }
           }
 
       # required on x64; the ARM64 runner has no taskbar and does not move windows on a synthetic drag
@@ -138,6 +143,13 @@ jobs:
         run: |
           $p = Start-Process out\native-${{ matrix.exe }}\Glimpse.exe -ArgumentList '/selftest:tests\geometry-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-native-msvc.txt
           Get-Content selftest-native-msvc.txt
+          exit $p.ExitCode
+
+      - name: Crowded-desktop parity, native MSVC build
+        shell: powershell
+        run: |
+          $p = Start-Process out\native-${{ matrix.exe }}\Glimpse.exe -ArgumentList '/selftest:out\sim\sim-cases.txt' -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest-native-simulation.txt
+          Get-Content selftest-native-simulation.txt | Select-Object -Last 5
           exit $p.ExitCode
 
       - name: Self-test, native EXE from dist/ (clang, cross-compiled on Linux)
